@@ -1,0 +1,763 @@
+const VERSION = '1.0.0';
+const MAX_DATA_BYTES = 850 * 1024; // keep margin below GitHub Contents API's 1 MiB response boundary
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+const loginAttempts = new Map();
+const routeCache = new Map();
+
+const DEFAULT_CATEGORIES = [
+  { id: 'cafe', name: 'کافه', icon: '☕', color: '#69d9c2' },
+  { id: 'restaurant', name: 'رستوران و غذا', icon: '🍽️', color: '#f3b96c' },
+  { id: 'nature', name: 'طبیعت و باغ', icon: '🌿', color: '#71df9d' },
+  { id: 'historical', name: 'تاریخی و فرهنگی', icon: '🏛️', color: '#b5a5ff' },
+  { id: 'entertainment', name: 'تفریح و سرگرمی', icon: '🎡', color: '#72c9f2' },
+  { id: 'viewpoint', name: 'منظره و بام', icon: '🌇', color: '#f2a5b7' },
+  { id: 'family', name: 'خانوادگی', icon: '👨‍👩‍👧', color: '#7fdbd1' },
+  { id: 'shopping', name: 'خرید', icon: '🛍️', color: '#d8a8f4' },
+  { id: 'sports', name: 'ورزشی و فعالیت', icon: '🚴', color: '#8ed1f1' },
+  { id: 'hidden', name: 'کشف ناشناخته', icon: '✧', color: '#b8c8d5' }
+];
+const DEFAULT_TAGS = ['دوستانه', 'پشتو', 'تاریک', 'Skybit'];
+const DEFAULT_BOUNDS = { south: 29.47, west: 52.42, north: 29.73, east: 52.78, step: 0.004 };
+
+function json(data, status = 200, headers = {}) {
+  return new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...headers } });
+}
+function text(data, status = 200, headers = {}) {
+  return new Response(data, { status, headers: { 'content-type': 'text/plain; charset=utf-8', ...headers } });
+}
+function corsHeaders(request, env) {
+  const origin = request.headers.get('Origin');
+  const allowed = (env.ALLOWED_ORIGINS || env.SITE_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!origin || !allowed.includes(origin)) return {};
+  return {
+    'access-control-allow-origin': origin,
+    'access-control-allow-methods': 'GET,POST,OPTIONS',
+    'access-control-allow-headers': 'Content-Type, Authorization',
+    'access-control-max-age': '86400',
+    'vary': 'Origin'
+  };
+}
+function originAllowed(request, env) {
+  const origin = request.headers.get('Origin');
+  if (!origin) return true;
+  const allowed = (env.ALLOWED_ORIGINS || env.SITE_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
+  return allowed.includes(origin);
+}
+function withCors(response, request, env) {
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(corsHeaders(request, env))) headers.set(key, value);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+function safeText(value, max = 1200) { return String(value ?? '').trim().slice(0, max); }
+function number(value, min = -Infinity, max = Infinity) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < min || n > max) return null;
+  return n;
+}
+function slug(value) {
+  const s = safeText(value, 80).toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '');
+  return s || `item-${crypto.randomUUID().slice(0, 8)}`;
+}
+function makeId(prefix = 'id') { return `${prefix}_${crypto.randomUUID()}`; }
+function clone(value) { return JSON.parse(JSON.stringify(value)); }
+function normalizeDigits(value) {
+  return String(value || '').replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
+}
+function parseCoordinates(input) {
+  const s = normalizeDigits(input).replace(/\u00a0/g, ' ');
+  const latDms = [...s.matchAll(/(\d{1,3})\s*[°º]\s*(\d{1,2})\s*['′’]\s*(\d+(?:\.\d+)?)?\s*["″”]?\s*([NS])/gi)];
+  const lonDms = [...s.matchAll(/(\d{1,3})\s*[°º]\s*(\d{1,2})\s*['′’]\s*(\d+(?:\.\d+)?)?\s*["″”]?\s*([EW])/gi)];
+  if (latDms.length && lonDms.length) {
+    const cv = m => (Number(m[1]) + Number(m[2]) / 60 + Number(m[3] || 0) / 3600) * (/[SW]/i.test(m[4]) ? -1 : 1);
+    const lat = cv(latDms[0]), lng = cv(lonDms[0]);
+    if (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { lat, lng };
+  }
+  const patterns = [
+    /@\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)/,
+    /[?&](?:q|query|ll)=(-?\d{1,2}(?:\.\d+)?)[,%2C ]+(-?\d{1,3}(?:\.\d+)?)/i,
+    /(-?\d{1,2}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)/
+  ];
+  for (const re of patterns) {
+    const match = s.match(re);
+    if (match) {
+      const lat = Number(match[1]), lng = Number(match[2]);
+      if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) return { lat, lng };
+    }
+  }
+  const osm = s.match(/[?&]mlat=(-?\d+(?:\.\d+)?).*?[?&]mlon=(-?\d+(?:\.\d+)?)/i);
+  if (osm) return { lat: Number(osm[1]), lng: Number(osm[2]) };
+  const hash = s.match(/#map=\d+\/(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)/i);
+  if (hash) return { lat: Number(hash[1]), lng: Number(hash[2]) };
+  return null;
+}
+function haversine(a, b) {
+  const rad = v => v * Math.PI / 180, R = 6371000;
+  const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+function coordsToPoints(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 1500).map(p => {
+    if (Array.isArray(p) && p.length >= 2) return [number(p[0], -90, 90), number(p[1], -180, 180)];
+    if (p && typeof p === 'object') return [number(p.lat, -90, 90), number(p.lng, -180, 180)];
+    return [null, null];
+  }).filter(p => p[0] !== null && p[1] !== null);
+}
+function routeDistance(points) {
+  let total = 0;
+  for (let i = 1; i < points.length; i++) total += haversine({ lat: points[i - 1][0], lng: points[i - 1][1] }, { lat: points[i][0], lng: points[i][1] });
+  return Math.round(total);
+}
+function defaultData() {
+  return {
+    schemaVersion: 1,
+    updatedAt: new Date().toISOString(),
+    settings: {
+      city: 'Shiraz', cityFa: 'شیراز', center: { lat: 29.5918, lng: 52.5837 }, explorationBounds: { ...DEFAULT_BOUNDS },
+      privacy: { visitsPrivateByDefault: true, routesPrivateByDefault: true }
+    },
+    categories: clone(DEFAULT_CATEGORIES), tags: [...DEFAULT_TAGS], places: [], visits: [], routes: [],
+    meta: { lastTelegramUpdateId: 0, processedTelegramUpdateIds: [], createdAt: new Date().toISOString() }
+  };
+}
+function normalizeData(data) {
+  const base = defaultData();
+  if (!data || typeof data !== 'object') return base;
+  const out = { ...base, ...data };
+  out.settings = { ...base.settings, ...(data.settings || {}) };
+  out.settings.center = { ...base.settings.center, ...(data.settings?.center || {}) };
+  out.settings.explorationBounds = { ...DEFAULT_BOUNDS, ...(data.settings?.explorationBounds || {}) };
+  out.categories = Array.isArray(data.categories) ? data.categories : clone(DEFAULT_CATEGORIES);
+  out.tags = Array.isArray(data.tags) ? data.tags : [...DEFAULT_TAGS];
+  out.places = Array.isArray(data.places) ? data.places : [];
+  out.visits = Array.isArray(data.visits) ? data.visits : [];
+  out.routes = Array.isArray(data.routes) ? data.routes : [];
+  out.meta = { lastTelegramUpdateId: 0, processedTelegramUpdateIds: [], ...(data.meta || {}) };
+  if (!Array.isArray(out.meta.processedTelegramUpdateIds)) out.meta.processedTelegramUpdateIds = [];
+  return out;
+}
+function githubConfig(env) {
+  const owner = safeText(env.GITHUB_OWNER, 100), repo = safeText(env.GITHUB_DATA_REPO, 100);
+  const branch = safeText(env.GITHUB_BRANCH || 'main', 100), path = safeText(env.GITHUB_DATA_PATH || 'atlas.json', 300);
+  if (!owner || !repo || !env.GITHUB_TOKEN) throw new Error('تنظیمات GitHub کامل نیستند؛ GITHUB_OWNER، GITHUB_DATA_REPO و GITHUB_TOKEN را بررسی کن.');
+  return { owner, repo, branch, path };
+}
+async function githubRequest(env, path, options = {}) {
+  const cfg = githubConfig(env);
+  const url = `https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/${path}`;
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      'Accept': 'application/vnd.github+json',
+      'Authorization': `Bearer ${env.GITHUB_TOKEN}`,
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'Shiraz-Atlas-Cloudflare-Worker',
+      ...(options.headers || {})
+    }
+  });
+  return response;
+}
+function encodeBase64Utf8(value) {
+  const bytes = encoder.encode(value);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+function decodeBase64Utf8(value) {
+  const binary = atob(String(value || '').replace(/\s/g, ''));
+  const bytes = Uint8Array.from(binary, ch => ch.charCodeAt(0));
+  return decoder.decode(bytes);
+}
+async function readData(env) {
+  const cfg = githubConfig(env);
+  const path = cfg.path.split('/').map(encodeURIComponent).join('/');
+  const response = await githubRequest(env, `contents/${path}?ref=${encodeURIComponent(cfg.branch)}`);
+  if (response.status === 404) throw new Error(`فایل ${cfg.path} در ریپوی خصوصی ${cfg.repo} پیدا نشد. فایل atlas.json اولیه را طبق راهنما در آن ریپو قرار بده.`);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.message || `GitHub API خطا داد (${response.status}).`);
+  if (Number(body.size || 0) > MAX_DATA_BYTES) throw new Error('فایل atlas.json از حد امن ۸۵۰ کیلوبایت بزرگ‌تر شده است. تاریخچه مسیرها را بایگانی کن یا ذخیره‌سازی را به Cloudflare D1 منتقل کن.');
+  if (!body.content) throw new Error('GitHub فایل داده را برنگرداند یا فایل خالی است.');
+  return { data: normalizeData(JSON.parse(decodeBase64Utf8(body.content))), sha: body.sha, cfg };
+}
+async function writeData(env, data, sha, message, cfg) {
+  const path = cfg.path.split('/').map(encodeURIComponent).join('/');
+  const serialized = JSON.stringify(data, null, 2) + '\n';
+  if (encoder.encode(serialized).byteLength > MAX_DATA_BYTES) throw new Error('فایل atlas.json به سقف امن ۸۵۰ کیلوبایت رسیده است. تاریخچه قدیمی را بایگانی کن یا به Cloudflare D1 مهاجرت کن تا داده‌ها از دست نروند.');
+  const response = await githubRequest(env, `contents/${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: `Shiraz Atlas: ${safeText(message, 90)}`, content: encodeBase64Utf8(serialized), sha, branch: cfg.branch })
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(body.message || `ذخیره در GitHub ناموفق بود (${response.status}).`);
+    error.status = response.status;
+    throw error;
+  }
+  return body;
+}
+async function updateData(env, mutator, message) {
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const current = await readData(env);
+    const data = clone(current.data);
+    const result = await mutator(data);
+    data.updatedAt = new Date().toISOString();
+    try {
+      await writeData(env, data, current.sha, message, current.cfg);
+      return { data, result };
+    } catch (error) {
+      lastError = error;
+      if (![409, 422].includes(error.status) || attempt === 2) throw error;
+    }
+  }
+  throw lastError || new Error('ذخیره داده کامل نشد.');
+}
+function publicData(data) {
+  return {
+    schemaVersion: data.schemaVersion, updatedAt: data.updatedAt,
+    settings: { city: data.settings.city, cityFa: data.settings.cityFa, center: data.settings.center, explorationBounds: data.settings.explorationBounds },
+    categories: data.categories, tags: data.tags,
+    places: data.places.filter(p => p.visibility !== 'private').map(({ notes, ...place }) => place),
+    // Only explicitly public tracks are shared; personal notes and visits stay private.
+    visits: [], routes: data.routes.filter(r => r.visibility === 'public').map(({ notes, ...route }) => route), isAdmin: false
+  };
+}
+async function hmacSign(value, secret) {
+  const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(value));
+  return bytesToBase64Url(new Uint8Array(sig));
+}
+function bytesToBase64Url(bytes) {
+  let binary = ''; for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+function base64UrlToString(s) {
+  const normalized = s.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, ch => ch.charCodeAt(0));
+  return decoder.decode(bytes);
+}
+async function issueToken(env) {
+  if (!env.SESSION_SECRET || env.SESSION_SECRET.length < 32) throw new Error('SESSION_SECRET باید حداقل ۳۲ کاراکتر باشد.');
+  const now = Math.floor(Date.now() / 1000);
+  const payload = bytesToBase64Url(encoder.encode(JSON.stringify({ sub: 'atlas-admin', iat: now, exp: now + 8 * 60 * 60, nonce: crypto.randomUUID() })));
+  const sig = await hmacSign(payload, env.SESSION_SECRET);
+  return `${payload}.${sig}`;
+}
+function constantTimeStringEqual(a, b) {
+  const left = encoder.encode(String(a || '')), right = encoder.encode(String(b || ''));
+  let diff = left.length ^ right.length; const length = Math.max(left.length, right.length);
+  for (let i = 0; i < length; i++) diff |= (left[i] || 0) ^ (right[i] || 0);
+  return diff === 0;
+}
+async function requireAdmin(request, env) {
+  const header = request.headers.get('Authorization') || '';
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (!match || !env.SESSION_SECRET) return false;
+  const [payloadPart, signature] = match[1].split('.');
+  if (!payloadPart || !signature) return false;
+  try {
+    const expected = await hmacSign(payloadPart, env.SESSION_SECRET);
+    if (!constantTimeStringEqual(expected, signature)) return false;
+    const payload = JSON.parse(base64UrlToString(payloadPart));
+    return payload.sub === 'atlas-admin' && Number(payload.exp) > Math.floor(Date.now() / 1000);
+  } catch { return false; }
+}
+async function passwordMatches(input, expected) {
+  if (!expected) return false;
+  const [a, b] = await Promise.all([crypto.subtle.digest('SHA-256', encoder.encode(String(input))), crypto.subtle.digest('SHA-256', encoder.encode(String(expected)))]);
+  const x = new Uint8Array(a), y = new Uint8Array(b); let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
+}
+function loginRateLimited(request) {
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const entry = loginAttempts.get(ip);
+  if (!entry) return false;
+  if (Date.now() > entry.until) { loginAttempts.delete(ip); return false; }
+  return entry.count >= 8;
+}
+function recordLoginFailure(request) {
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  const now = Date.now();
+  const entry = loginAttempts.get(ip);
+  if (!entry || now > entry.until) loginAttempts.set(ip, { count: 1, until: now + 10 * 60 * 1000 });
+  else entry.count++;
+  if (loginAttempts.size > 2000) loginAttempts.clear();
+}
+function clearLoginFailures(request) { loginAttempts.delete(request.headers.get('CF-Connecting-IP') || 'unknown'); }
+function requireDataEnv(env) { githubConfig(env); }
+
+function mutateAtlas(data, action, payload = {}) {
+  const now = new Date().toISOString();
+  const categories = data.categories;
+  if (action === 'place.create') {
+    const name = safeText(payload.name, 120), lat = number(payload.lat, -90, 90), lng = number(payload.lng, -180, 180);
+    if (!name || lat === null || lng === null) throw new Error('نام و مختصات معتبر برای مکان ضروری است.');
+    const place = {
+      id: makeId('pl'), name, lat, lng, categoryId: safeText(payload.categoryId, 80) || 'hidden', address: safeText(payload.address, 250),
+      description: safeText(payload.description, 1200), tags: Array.isArray(payload.tags) ? payload.tags.map(t => safeText(t, 40)).filter(Boolean).slice(0, 20) : [],
+      entryFee: number(payload.entryFee, 0, 100000000000) ?? null, estimatedCost: number(payload.estimatedCost, 0, 100000000000) ?? null,
+      rating: number(payload.rating, 0, 5) ?? null, bestTime: safeText(payload.bestTime, 120), phone: safeText(payload.phone, 60), website: safeText(payload.website, 500),
+      imageUrl: safeText(payload.imageUrl, 1000), notes: safeText(payload.notes, 1200), status: ['active','planned','closed'].includes(payload.status) ? payload.status : 'active',
+      visibility: payload.visibility === 'private' ? 'private' : 'public', createdAt: now, updatedAt: now, source: safeText(payload.source || 'website', 40)
+    };
+    if (!categories.some(c => c.id === place.categoryId)) place.categoryId = categories[0]?.id || 'hidden';
+    for (const tag of place.tags) if (!data.tags.some(t => t.toLowerCase() === tag.toLowerCase())) data.tags.push(tag);
+    data.places.unshift(place); return { id: place.id, place };
+  }
+  if (action === 'place.update') {
+    const place = data.places.find(p => p.id === payload.id); if (!place) throw new Error('مکان موردنظر پیدا نشد.');
+    const fields = ['name','categoryId','address','description','bestTime','phone','website','imageUrl','notes','status','visibility'];
+    for (const key of fields) if (Object.prototype.hasOwnProperty.call(payload, key)) place[key] = safeText(payload[key], key === 'description' || key === 'notes' ? 1200 : key === 'website' || key === 'imageUrl' ? 1000 : 250);
+    if (Object.prototype.hasOwnProperty.call(payload, 'lat')) { const v = number(payload.lat, -90, 90); if (v === null) throw new Error('عرض جغرافیایی معتبر نیست.'); place.lat = v; }
+    if (Object.prototype.hasOwnProperty.call(payload, 'lng')) { const v = number(payload.lng, -180, 180); if (v === null) throw new Error('طول جغرافیایی معتبر نیست.'); place.lng = v; }
+    for (const key of ['entryFee','estimatedCost','rating']) if (Object.prototype.hasOwnProperty.call(payload, key)) place[key] = payload[key] === '' || payload[key] === null ? null : number(payload[key], 0, key === 'rating' ? 5 : 100000000000);
+    if (Object.prototype.hasOwnProperty.call(payload, 'tags')) {
+      place.tags = Array.isArray(payload.tags) ? payload.tags.map(t => safeText(t, 40)).filter(Boolean).slice(0, 20) : [];
+      for (const tag of place.tags) if (!data.tags.some(t => t.toLowerCase() === tag.toLowerCase())) data.tags.push(tag);
+    }
+    if (!categories.some(c => c.id === place.categoryId)) throw new Error('دسته‌بندی انتخاب‌شده معتبر نیست.');
+    if (!['active','planned','closed'].includes(place.status)) place.status = 'active';
+    place.visibility = place.visibility === 'private' ? 'private' : 'public'; place.updatedAt = now; return { id: place.id };
+  }
+  if (action === 'place.delete') {
+    const index = data.places.findIndex(p => p.id === payload.id); if (index < 0) throw new Error('مکان موردنظر پیدا نشد.');
+    const [removed] = data.places.splice(index, 1); return { id: removed.id };
+  }
+  if (action === 'visit.create') {
+    const place = data.places.find(p => p.id === payload.placeId); if (!place) throw new Error('مکان بازدید در داده‌ها موجود نیست.');
+    const visit = { id: makeId('vs'), placeId: place.id, visitedAt: payload.visitedAt && !Number.isNaN(Date.parse(payload.visitedAt)) ? new Date(payload.visitedAt).toISOString() : now,
+      quality: ['good','normal','bad'].includes(payload.quality) ? payload.quality : 'normal', note: safeText(payload.note, 1200), durationMinutes: number(payload.durationMinutes, 0, 100000) ?? null,
+      visibility: payload.visibility === 'public' ? 'public' : 'private', createdAt: now };
+    data.visits.unshift(visit); return { id: visit.id };
+  }
+  if (action === 'visit.update') {
+    const visit = data.visits.find(v => v.id === payload.id); if (!visit) throw new Error('بازدید پیدا نشد.');
+    if (payload.quality) visit.quality = ['good','normal','bad'].includes(payload.quality) ? payload.quality : visit.quality;
+    if (Object.prototype.hasOwnProperty.call(payload, 'note')) visit.note = safeText(payload.note, 1200);
+    if (Object.prototype.hasOwnProperty.call(payload, 'durationMinutes')) visit.durationMinutes = number(payload.durationMinutes, 0, 100000) ?? null;
+    if (payload.visitedAt && !Number.isNaN(Date.parse(payload.visitedAt))) visit.visitedAt = new Date(payload.visitedAt).toISOString();
+    return { id: visit.id };
+  }
+  if (action === 'visit.delete') {
+    const index = data.visits.findIndex(v => v.id === payload.id); if (index < 0) throw new Error('بازدید پیدا نشد.');
+    data.visits.splice(index, 1); return { id: payload.id };
+  }
+  if (action === 'route.create') {
+    const coords = coordsToPoints(payload.coordinates);
+    if (coords.length < 2) throw new Error('برای ثبت مسیر حداقل دو نقطه لازم است.');
+    const route = { id: makeId('rt'), name: safeText(payload.name || 'مسیر ثبت‌شده', 120), coordinates: coords,
+      distanceMeters: routeDistance(coords), quality: ['good','normal','bad'].includes(payload.quality) ? payload.quality : 'normal',
+      mode: ['driving','walking','cycling','motorcycle','other'].includes(payload.mode) ? payload.mode : 'other', notes: safeText(payload.notes, 1200),
+      visitedAt: payload.visitedAt && !Number.isNaN(Date.parse(payload.visitedAt)) ? new Date(payload.visitedAt).toISOString() : now,
+      visibility: payload.visibility === 'public' ? 'public' : 'private', createdAt: now };
+    data.routes.unshift(route); return { id: route.id, distanceMeters: route.distanceMeters };
+  }
+  if (action === 'route.update') {
+    const route = data.routes.find(r => r.id === payload.id); if (!route) throw new Error('مسیر پیدا نشد.');
+    if (Object.prototype.hasOwnProperty.call(payload, 'coordinates')) { const coords = coordsToPoints(payload.coordinates); if (coords.length < 2) throw new Error('مسیر باید حداقل دو نقطه داشته باشد.'); route.coordinates = coords; route.distanceMeters = routeDistance(coords); }
+    if (payload.name) route.name = safeText(payload.name, 120);
+    if (payload.quality) route.quality = ['good','normal','bad'].includes(payload.quality) ? payload.quality : route.quality;
+    if (payload.mode) route.mode = ['driving','walking','cycling','motorcycle','other'].includes(payload.mode) ? payload.mode : route.mode;
+    if (Object.prototype.hasOwnProperty.call(payload, 'notes')) route.notes = safeText(payload.notes, 1200);
+    if (payload.visitedAt && !Number.isNaN(Date.parse(payload.visitedAt))) route.visitedAt = new Date(payload.visitedAt).toISOString();
+    if (Object.prototype.hasOwnProperty.call(payload, 'visibility')) route.visibility = payload.visibility === 'public' ? 'public' : 'private';
+    return { id: route.id, distanceMeters: route.distanceMeters };
+  }
+  if (action === 'route.delete') {
+    const index = data.routes.findIndex(r => r.id === payload.id); if (index < 0) throw new Error('مسیر پیدا نشد.');
+    data.routes.splice(index, 1); return { id: payload.id };
+  }
+  if (action === 'category.create') {
+    const name = safeText(payload.name, 50); if (!name) throw new Error('نام دسته‌بندی الزامی است.');
+    if (categories.some(c => c.name.toLowerCase() === name.toLowerCase())) throw new Error('این دسته‌بندی از قبل وجود دارد.');
+    const id = slug(name); if (categories.some(c => c.id === id)) throw new Error('شناسه تکراری است؛ نام دیگری انتخاب کن.');
+    const category = { id, name, icon: safeText(payload.icon || '✦', 8), color: safeText(payload.color || '#63d8bd', 20) }; categories.push(category); return { id };
+  }
+  if (action === 'category.update') {
+    const cat = categories.find(c => c.id === payload.id); if (!cat) throw new Error('دسته‌بندی پیدا نشد.');
+    if (Object.prototype.hasOwnProperty.call(payload, 'name')) { const name = safeText(payload.name, 50); if (!name) throw new Error('نام دسته‌بندی نمی‌تواند خالی باشد.'); if (categories.some(c => c.id !== cat.id && c.name.toLowerCase() === name.toLowerCase())) throw new Error('این نام برای دسته‌بندی دیگری استفاده شده است.'); cat.name = name; } if (payload.icon) cat.icon = safeText(payload.icon, 8); return { id: cat.id };
+  }
+  if (action === 'category.delete') {
+    if (data.places.some(p => p.categoryId === payload.id)) throw new Error('این دسته‌بندی به مکان‌هایی اختصاص دارد؛ ابتدا دسته‌بندی مکان‌ها را تغییر بده.');
+    const index = categories.findIndex(c => c.id === payload.id); if (index < 0) throw new Error('دسته‌بندی پیدا نشد.'); categories.splice(index, 1); return { id: payload.id };
+  }
+  if (action === 'tag.create') {
+    const tag = safeText(payload.name, 50); if (!tag) throw new Error('نام برچسب الزامی است.');
+    if (data.tags.some(t => t.toLowerCase() === tag.toLowerCase())) throw new Error('این برچسب قبلاً ثبت شده است.'); data.tags.push(tag); return { name: tag };
+  }
+  if (action === 'tag.rename') {
+    const oldName = safeText(payload.oldName, 50), newName = safeText(payload.newName, 50);
+    if (!newName) throw new Error('نام جدید برچسب الزامی است.');
+    const index = data.tags.findIndex(t => t.toLowerCase() === oldName.toLowerCase()); if (index < 0) throw new Error('برچسب پیدا نشد.');
+    if (data.tags.some(t => t.toLowerCase() === newName.toLowerCase())) throw new Error('این نام از قبل وجود دارد.');
+    data.tags[index] = newName; data.places.forEach(p => { p.tags = (p.tags || []).map(t => t.toLowerCase() === oldName.toLowerCase() ? newName : t); }); return { oldName, newName };
+  }
+  if (action === 'tag.delete') {
+    const tag = safeText(payload.name, 50); const index = data.tags.findIndex(t => t.toLowerCase() === tag.toLowerCase()); if (index < 0) throw new Error('برچسب پیدا نشد.');
+    data.tags.splice(index, 1); data.places.forEach(p => { p.tags = (p.tags || []).filter(t => t.toLowerCase() !== tag.toLowerCase()); }); return { name: tag };
+  }
+  if (action === 'settings.update') {
+    if (payload.explorationBounds) {
+      const b = payload.explorationBounds;
+      const next = { south: number(b.south, -90, 90), west: number(b.west, -180, 180), north: number(b.north, -90, 90), east: number(b.east, -180, 180), step: number(b.step, .001, .05) };
+      if (Object.values(next).some(v => v === null) || next.south >= next.north || next.west >= next.east) throw new Error('محدوده نقشه معتبر نیست.');
+      data.settings.explorationBounds = next;
+    }
+    return { ok: true };
+  }
+  throw new Error('نوع عملیات پشتیبانی نمی‌شود.');
+}
+
+async function handleMutation(request, env) {
+  if (!originAllowed(request, env)) return json({ error: 'Origin مجاز نیست.' }, 403);
+  if (!await requireAdmin(request, env)) return json({ error: 'نشست ادمین معتبر نیست؛ دوباره وارد شو.' }, 401);
+  const body = await request.json().catch(() => null);
+  if (!body || typeof body.action !== 'string' || !body.payload || typeof body.payload !== 'object') return json({ error: 'درخواست تغییر داده معتبر نیست.' }, 400);
+  try {
+    const saved = await updateData(env, data => mutateAtlas(data, body.action, body.payload), body.action);
+    return json({ ok: true, result: saved.result, updatedAt: saved.data.updatedAt });
+  } catch (error) { return json({ error: error.message || 'ذخیره‌سازی انجام نشد.' }, error.status === 403 ? 502 : 400); }
+}
+
+function overpassCategory(tags) {
+  if (tags.amenity === 'cafe') return 'کافه';
+  if (tags.amenity === 'restaurant' || tags.amenity === 'fast_food') return 'رستوران';
+  if (tags.tourism || tags.historic) return 'گردشگری / تاریخی';
+  if (tags.leisure || tags.natural) return 'طبیعت / تفریح';
+  if (tags.shop) return 'خرید';
+  return 'مکان عمومی';
+}
+async function discoverNearby(url) {
+  const lat = number(url.searchParams.get('lat'), -90, 90), lng = number(url.searchParams.get('lng'), -180, 180);
+  const radius = number(url.searchParams.get('radius') || 3000, 250, 10000);
+  if (lat === null || lng === null || radius === null) return json({ error: 'مختصات یا شعاع جست‌وجو معتبر نیست.' }, 400);
+  const query = `[out:json][timeout:22];(nwr(around:${Math.round(radius)},${lat},${lng})["amenity"~"cafe|restaurant|fast_food|cinema|theatre|arts_centre|marketplace"];nwr(around:${Math.round(radius)},${lat},${lng})["tourism"];nwr(around:${Math.round(radius)},${lat},${lng})["leisure"~"park|garden|sports_centre|water_park"];nwr(around:${Math.round(radius)},${lat},${lng})["historic"];nwr(around:${Math.round(radius)},${lat},${lng})["shop"~"mall|department_store"];);out center tags;`;
+  const endpoints = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+  let lastError;
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded; charset=UTF-8', 'user-agent': 'ShirazAtlas/1.0 (+https://github.com/mehrdadmb2/shiraz-atlas)' }, body: `data=${encodeURIComponent(query)}`, signal: AbortSignal.timeout(24000) });
+      if (!response.ok) { lastError = new Error(`سرویس نقشه (${response.status})`); continue; }
+      const body = await response.json();
+      const items = (body.elements || []).map(el => {
+        const tags = el.tags || {}, center = el.center || el;
+        if (!center.lat || !center.lon) return null;
+        const name = tags.name || tags['name:fa'] || tags.brand || tags.operator;
+        if (!name) return null;
+        return { id: `osm-${el.type}-${el.id}`, name: safeText(name, 120), lat: Number(center.lat), lng: Number(center.lon), category: overpassCategory(tags), tags: { amenity: tags.amenity || '', tourism: tags.tourism || '', leisure: tags.leisure || '', historic: tags.historic || '', shop: tags.shop || '' }, address: [tags['addr:street'], tags['addr:suburb'], tags['addr:city']].filter(Boolean).join('، '), source: 'OpenStreetMap' };
+      }).filter(Boolean).slice(0, 70);
+      return json({ ok: true, source: 'OpenStreetMap', count: items.length, items, note: 'اطلاعات ممکن است ناقص یا قدیمی باشد؛ پیش از مراجعه بررسی کن.' }, 200, { 'cache-control': 'public, max-age=300' });
+    } catch (error) { lastError = error; }
+  }
+  return json({ error: lastError?.message || 'در حال حاضر سرویس جست‌وجوی مکان‌های اطراف در دسترس نیست.' }, 502);
+}
+async function routePreview(url) {
+  const fromLat = number(url.searchParams.get('fromLat'), -90, 90), fromLng = number(url.searchParams.get('fromLng'), -180, 180);
+  const toLat = number(url.searchParams.get('toLat'), -90, 90), toLng = number(url.searchParams.get('toLng'), -180, 180);
+  const mode = url.searchParams.get('mode') || 'driving';
+  if ([fromLat, fromLng, toLat, toLng].some(v => v === null)) return json({ error: 'مبدأ یا مقصد معتبر نیست.' }, 400);
+  if (mode !== 'driving') return json({ error: 'پیش‌نمایش داخل اطلس در حال حاضر برای خودرو فعال است؛ برای پیاده‌روی و دوچرخه از مسیریابی Google Maps استفاده کن.' }, 400);
+  const key = [fromLat, fromLng, toLat, toLng, mode].map(v => Number(v).toFixed(5)).join(':');
+  const cached = routeCache.get(key);
+  if (cached && cached.expires > Date.now()) return json({ ...cached.value, cached: true }, 200, { 'cache-control': 'public, max-age=180' });
+  const coords = `${fromLng},${fromLat};${toLng},${toLat}`;
+  const target = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false&alternatives=false`;
+  try {
+    const response = await fetch(target, { headers: { 'user-agent': 'ShirazAtlas/1.0 (+https://github.com/mehrdadmb2/shiraz-atlas)' }, signal: AbortSignal.timeout(18000) });
+    if (!response.ok) return json({ error: `سرویس مسیریابی پاسخ ${response.status} داد.` }, 502);
+    const body = await response.json();
+    const route = body.routes?.[0];
+    if (!route?.geometry?.coordinates?.length) return json({ error: 'برای این مبدأ و مقصد مسیر رانندگی پیدا نشد.' }, 404);
+    const result = { ok: true, profile: 'driving', distanceMeters: Math.round(route.distance), durationSeconds: Math.round(route.duration), geometry: route.geometry, source: 'OSRM / OpenStreetMap' };
+    routeCache.set(key, { value: result, expires: Date.now() + 5 * 60 * 1000 });
+    if (routeCache.size > 250) { const first = routeCache.keys().next().value; routeCache.delete(first); }
+    return json(result, 200, { 'cache-control': 'public, max-age=180' });
+  } catch {
+    return json({ error: 'سرویس مسیریابی فعلاً در دسترس نیست؛ از لینک Google Maps برای مسیر زنده استفاده کن.' }, 502);
+  }
+}
+
+async function weatherFor(url) {
+  const lat = number(url.searchParams.get('lat'), -90, 90), lng = number(url.searchParams.get('lng'), -180, 180);
+  if (lat === null || lng === null) return json({ error: 'مختصات هواشناسی معتبر نیست.' }, 400);
+  const target = new URL('https://api.open-meteo.com/v1/forecast');
+  target.search = new URLSearchParams({ latitude: String(lat), longitude: String(lng), current: 'temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m', daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max', timezone: 'auto', forecast_days: '3' }).toString();
+  try {
+    const response = await fetch(target, { headers: { 'user-agent': 'ShirazAtlas/1.0 (+https://github.com/mehrdadmb2/shiraz-atlas)' }, signal: AbortSignal.timeout(12000) });
+    if (!response.ok) return json({ error: `سرویس هواشناسی پاسخ ${response.status} داد.` }, 502);
+    return new Response(await response.text(), { status: 200, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=900', ...corsHeadersFromUrl(url) } });
+  } catch { return json({ error: 'دریافت وضعیت هوا ممکن نشد.' }, 502); }
+}
+function corsHeadersFromUrl() { return {}; }
+
+async function telegramCall(env, method, payload) {
+  if (!env.TELEGRAM_BOT_TOKEN) throw new Error('TELEGRAM_BOT_TOKEN تنظیم نشده است.');
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body.ok) throw new Error(body.description || `Telegram ${method} failed`);
+  return body.result;
+}
+function isAdmin(userId, env) {
+  const ids = (env.TELEGRAM_ADMIN_IDS || '').split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
+  return ids.includes(String(userId));
+}
+function tgEscape(value) { return String(value ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+async function tgMessage(env, chatId, message, options = {}) {
+  return telegramCall(env, 'sendMessage', { chat_id: chatId, text: message, parse_mode: 'HTML', disable_web_page_preview: true, ...options });
+}
+function formatPlace(place, data) {
+  const category = data.categories.find(c => c.id === place.categoryId);
+  const parts = [
+    `${category?.icon || '📍'} <b>${tgEscape(place.name)}</b>`,
+    category ? `🗂 ${tgEscape(category.name)}` : '',
+    place.address ? `📌 ${tgEscape(place.address)}` : '',
+    place.entryFee != null ? `🎟 ورودی: ${Number(place.entryFee).toLocaleString('en-US')} تومان` : '',
+    place.estimatedCost != null ? `💰 هزینه تقریبی: ${Number(place.estimatedCost).toLocaleString('en-US')} تومان` : '',
+    place.rating != null ? `⭐ امتیاز شخصی: ${place.rating}/5` : '',
+    place.description ? `\n${tgEscape(place.description)}` : '',
+    `\n🧭 <a href="https://www.google.com/maps/dir/?api=1&amp;destination=${place.lat},${place.lng}">مسیریابی در Google Maps</a>`,
+    `🆔 <code>${tgEscape(place.id)}</code>`
+  ].filter(Boolean);
+  return parts.join('\n');
+}
+async function sendPlace(env, chatId, place, data) {
+  await tgMessage(env, chatId, formatPlace(place, data), { reply_markup: { inline_keyboard: [[{ text: '🧭 مسیریابی', url: `https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lng}` }, { text: '🗺️ نقشه اطلس', url: `${env.PUBLIC_SITE_URL || 'https://mehrdadmb2.github.io/shiraz-atlas/'}?place=${encodeURIComponent(place.id)}` }]] } });
+  await telegramCall(env, 'sendLocation', { chat_id: chatId, latitude: place.lat, longitude: place.lng });
+}
+async function adminMutation(env, action, payload, updateId) {
+  return updateData(env, data => {
+    const id = Number(updateId || 0);
+    const seen = data.meta.processedTelegramUpdateIds || [];
+    // Telegram may deliver webhook requests concurrently and out of order.
+    // Store a bounded set of processed IDs instead of dropping older updates.
+    if (id && seen.includes(id)) return { duplicate: true };
+    const result = mutateAtlas(data, action, payload);
+    if (id) {
+      data.meta.lastTelegramUpdateId = Math.max(Number(data.meta.lastTelegramUpdateId || 0), id);
+      data.meta.processedTelegramUpdateIds = [...seen, id].slice(-500);
+    }
+    return result;
+  }, `telegram ${action}`);
+}
+function parseKeyValues(parts) {
+  const out = {};
+  for (const part of parts) {
+    const i = part.indexOf('='); if (i < 1) continue;
+    const key = part.slice(0, i).trim().toLowerCase(), value = part.slice(i + 1).trim();
+    const map = { name: 'name', title: 'name', category: 'categoryId', cat: 'categoryId', fee: 'entryFee', entry: 'entryFee', cost: 'estimatedCost', rating: 'rating', tags: 'tags', description: 'description', desc: 'description', address: 'address', phone: 'phone', website: 'website', status: 'status', lat: 'lat', lng: 'lng', visibility: 'visibility', notes: 'notes' };
+    if (map[key]) out[map[key]] = map[key] === 'tags' ? value.split(/[,،]/).map(s => s.trim()).filter(Boolean) : (['entryFee','estimatedCost','rating','lat','lng'].includes(map[key]) ? Number(normalizeDigits(value).replace(/[,٬\s]/g, '')) : value);
+  }
+  return out;
+}
+function coordinateTitle(raw) {
+  const cleaned = String(raw || '').replace(/https?:\/\/\S+/g, ' ').replace(/\d{1,3}\s*[°º][\s\S]*$/g, ' ').replace(/-?\d{1,2}\.\d+\s*[,;]\s*-?\d{1,3}\.\d+/g, ' ').replace(/-?\d{1,2}\s*[,;]\s*-?\d{1,3}(?!\d)/g, ' ').replace(/\s+/g, ' ').trim();
+  return safeText(cleaned, 120) || `مکان ذخیره‌شده ${new Date().toLocaleDateString('fa-IR')}`;
+}
+function categoryLookup(data, value) {
+  const s = safeText(value, 80).toLowerCase();
+  if (!s) return data.categories[0]?.id || 'hidden';
+  return data.categories.find(c => c.id.toLowerCase() === s || c.name.toLowerCase() === s)?.id || slug(s);
+}
+function formatHelp(admin) {
+  return `<b>🧭 راهنمای Shiraz Atlas</b>\n\n<b>دستورات عمومی</b>\n/start — شروع\n/help — راهنما\n/myid — نمایش شناسه تلگرام\n/places — فهرست مکان‌ها\n/search عبارت — جست‌وجو\n/random [دسته] — مقصد تصادفی\n/near lat,lng — مکان‌های نزدیک مختصات\n/categories — دسته‌بندی‌ها\n/weather [lat,lng] — وضعیت هوا\n\n${admin ? `<b>🔐 دستورات ادمین</b>\n/add نام | lat,lng | دسته | ورودی | توضیحات\n/edit ID | name=... | fee=... | tags=...\n/delete ID — حذف با تأیید\n/visit ID | good/normal/bad | یادداشت\n/route نام | کیفیت | lat,lng;lat,lng | یادداشت\n/categoryadd نام | ایموجی\n/tagadd نام\n/stats — آمار خصوصی\n\n<b>ارسال لوکیشن</b>\nمختصات را مستقیم بفرست؛ مثال:\n<code>29.722356, 52.470975</code>\nیا مختصات DMS:\n<code>29°43'20.5\"N 52°28'15.5\"E</code>\n\nبرای افزودن با جزئیات:\n<code>/add باغ ارم | 29.63,52.53 | طبیعت و باغ | 50000 | توضیحات</code>` : 'برای عملیات مدیریتی باید شناسه عددی تلگرام شما در فهرست ادمین‌ها ثبت شده باشد.'}\n\n🌐 <a href="${'https://mehrdadmb2.github.io/shiraz-atlas/'}">باز کردن نقشه Shiraz Atlas</a>`;
+}
+async function getBotData(env) { return (await readData(env)).data; }
+async function handleTelegramMessage(message, update, env) {
+  const chatId = message.chat?.id, fromId = message.from?.id;
+  if (!chatId || !fromId) return;
+  const admin = isAdmin(fromId, env);
+  const rawText = String(message.text || message.caption || '').trim();
+  if (message.location) {
+    const point = { lat: Number(message.location.latitude), lng: Number(message.location.longitude) };
+    if (!admin) {
+      const data = await getBotData(env);
+      const near = data.places.filter(p => p.visibility !== 'private').map(p => ({ p, d: haversine(point, p) })).sort((a,b)=>a.d-b.d).slice(0,5);
+      if (!near.length) return tgMessage(env, chatId, 'هنوز مکانی در اطلس ثبت نشده است.');
+      await tgMessage(env, chatId, '<b>📍 نزدیک‌ترین مکان‌ها به موقعیت ارسالی</b>\n\n' + near.map(x => `• ${tgEscape(x.p.name)} — ${(x.d/1000).toFixed(1)} km`).join('\n'));
+      for (const item of near.slice(0,1)) await sendPlace(env, chatId, item.p, data);
+      return;
+    }
+    const caption = safeText(rawText, 500);
+    const parsed = parseCoordinates(caption) || point;
+    const title = coordinateTitle(caption);
+    const saved = await adminMutation(env, 'place.create', { name: title, ...parsed, source: 'telegram', categoryId: 'hidden', visibility: 'public' }, update.update_id);
+    if (saved.result?.duplicate) return;
+    return tgMessage(env, chatId, `✅ مکان <b>${tgEscape(title)}</b> ذخیره شد.\nمختصات: <code>${parsed.lat}, ${parsed.lng}</code>\nشناسه: <code>${tgEscape(saved.result.id)}</code>\n\nجزئیات، دسته‌بندی، هزینه و برچسب‌ها را از سایت ویرایش کن.`);
+  }
+  const commandMatch = rawText.match(/^\/([\w\u0600-\u06ff]+)(?:@[\w]+)?(?:\s+([\s\S]*))?$/);
+  if (commandMatch) {
+    const command = commandMatch[1].toLowerCase();
+    const argText = (commandMatch[2] || '').trim();
+    const aliases = { 'کمک':'help', 'راهنما':'help', 'مکانها':'places', 'مکان‌ها':'places', 'تصادفی':'random', 'افزودن':'add', 'بازدید':'visit', 'آمار':'stats' };
+    const cmd = aliases[command] || command;
+    if (cmd === 'start') return tgMessage(env, chatId, `سلام ${tgEscape(message.from.first_name || 'دوست من')}! 👋\nبه <b>Shiraz Atlas</b> خوش آمدی.\n\nمکان‌های موردعلاقه‌ات را ذخیره کن، مقصد تصادفی بگیر و مسیرهایت را ثبت کن.\n\n/help برای راهنما`);
+    if (cmd === 'help') return tgMessage(env, chatId, formatHelp(admin));
+    if (cmd === 'myid' || cmd === 'whoami') return tgMessage(env, chatId, `شناسه عددی تلگرام شما:\n<code>${fromId}</code>\n${admin ? '✅ دسترسی ادمین فعال است.' : 'دسترسی مدیریتی فعال نیست.'}`);
+    if (cmd === 'cancel') return tgMessage(env, chatId, 'عملیات جاری لغو شد.');
+    if (cmd === 'categories') { const data = await getBotData(env); return tgMessage(env, chatId, '<b>🗂 دسته‌بندی‌های اطلس</b>\n' + data.categories.map(c => `${c.icon || '✦'} ${tgEscape(c.name)}`).join('\n') + '\n\nبرچسب‌ها: ' + data.tags.map(tgEscape).join(' · ')); }
+    if (cmd === 'weather') {
+      const point = parseCoordinates(argText) || { lat: 29.5918, lng: 52.5837 };
+      const u = new URL('https://api.open-meteo.com/v1/forecast'); u.search = new URLSearchParams({ latitude: point.lat, longitude: point.lng, current: 'temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m', timezone: 'auto' }).toString();
+      const r = await fetch(u); if (!r.ok) return tgMessage(env, chatId, 'سرویس هواشناسی فعلاً در دسترس نیست.'); const w = await r.json(); const c = w.current || {};
+      return tgMessage(env, chatId, `<b>🌤 وضعیت فعلی هوا</b>\n🌡 دما: ${c.temperature_2m ?? '—'}°C\nاحساس واقعی: ${c.apparent_temperature ?? '—'}°C\n💧 رطوبت: ${c.relative_humidity_2m ?? '—'}٪\n💨 باد: ${c.wind_speed_10m ?? '—'} km/h\n\n<a href="https://open-meteo.com/">منبع: Open-Meteo</a>`);
+    }
+    if (cmd === 'places' || cmd === 'search') {
+      const data = await getBotData(env); const q = argText.toLowerCase();
+      const list = data.places.filter(p => (admin || p.visibility !== 'private') && (!q || `${p.name} ${p.description} ${p.address} ${(p.tags||[]).join(' ')}`.toLowerCase().includes(q))).slice(0, 10);
+      if (!list.length) return tgMessage(env, chatId, q ? 'نتیجه‌ای پیدا نشد.' : 'هنوز مکان عمومی ثبت نشده است.');
+      await tgMessage(env, chatId, `<b>📍 ${list.length} مکان ${q ? 'یافت‌شده' : 'ثبت‌شده'}</b>\n\n` + list.map((p,i)=>`${i+1}. ${tgEscape(p.name)} — <code>${tgEscape(p.id)}</code>`).join('\n'));
+      if (list.length === 1) await sendPlace(env, chatId, list[0], data);
+      return;
+    }
+    if (cmd === 'random') {
+      const data = await getBotData(env); const filter = argText.toLowerCase();
+      const pool = data.places.filter(p => (admin || p.visibility !== 'private') && (!filter || p.categoryId.toLowerCase() === filter || data.categories.find(c=>c.id===p.categoryId)?.name.toLowerCase().includes(filter) || (p.tags||[]).some(t=>t.toLowerCase().includes(filter))));
+      if (!pool.length) return tgMessage(env, chatId, 'برای این فیلتر مکانی پیدا نشد.');
+      const picked = pool[Math.floor(Math.random() * pool.length)]; await tgMessage(env, chatId, '🎲 مقصد شانسی اطلس انتخاب شد:'); return sendPlace(env, chatId, picked, data);
+    }
+    if (cmd === 'near') {
+      const point = parseCoordinates(argText); if (!point) return tgMessage(env, chatId, 'برای جست‌وجوی نزدیک، مختصات را همراه دستور بفرست:\n<code>/near 29.72,52.47</code>');
+      const data = await getBotData(env); const near = data.places.filter(p => admin || p.visibility !== 'private').map(p => ({p,d:haversine(point,p)})).sort((a,b)=>a.d-b.d).slice(0,5);
+      if (!near.length) return tgMessage(env, chatId, 'مکانی ثبت نشده است.');
+      await tgMessage(env, chatId, '<b>📍 نزدیک‌ترین مکان‌ها</b>\n' + near.map(x=>`• ${tgEscape(x.p.name)} — ${(x.d/1000).toFixed(2)} km`).join('\n'));
+      return;
+    }
+    if (cmd === 'add') {
+      if (!admin) return tgMessage(env, chatId, '⛔ این دستور فقط برای ادمین‌ها فعال است.');
+      const parts = argText.split('|').map(s=>s.trim()); const name = parts[0] || '';
+      const point = parseCoordinates(parts[1] || '');
+      if (!name || !point) return tgMessage(env, chatId, 'فرمت صحیح:\n<code>/add نام مکان | 29.722356,52.470975 | دسته‌بندی | ورودی | توضیحات</code>\n\nیا فقط مختصات را مستقیم برای ربات بفرست.');
+      const data = await getBotData(env); const fee = parts[3] ? Number(normalizeDigits(parts[3]).replace(/[,٬\s]/g,'')) : null;
+      const saved = await adminMutation(env, 'place.create', { name, ...point, categoryId: categoryLookup(data, parts[2]), entryFee: Number.isFinite(fee) ? fee : null, description: parts.slice(4).join(' | '), source: 'telegram' }, update.update_id);
+      if (saved.result?.duplicate) return;
+      return tgMessage(env, chatId, `✅ <b>${tgEscape(name)}</b> ذخیره شد.\nشناسه: <code>${saved.result.id}</code>\nحالا می‌توانی از سایت جزئیات کامل‌تری به آن اضافه کنی.`);
+    }
+    if (cmd === 'edit') {
+      if (!admin) return tgMessage(env, chatId, '⛔ این دستور فقط برای ادمین‌ها فعال است.');
+      const parts = argText.split('|').map(s=>s.trim()); const id = parts.shift(); if (!id || !parts.length) return tgMessage(env, chatId, 'فرمت: <code>/edit ID | name=نام جدید | fee=50000 | tags=دوستانه,Skybit</code>');
+      const patch = parseKeyValues(parts); patch.id = id;
+      if (patch.categoryId) { const data = await getBotData(env); patch.categoryId = categoryLookup(data, patch.categoryId); }
+      const saved = await adminMutation(env, 'place.update', patch, update.update_id); if (saved.result?.duplicate) return;
+      return tgMessage(env, chatId, `✅ تغییرات مکان <code>${tgEscape(id)}</code> ذخیره شد.`);
+    }
+    if (cmd === 'delete') {
+      if (!admin) return tgMessage(env, chatId, '⛔ این دستور فقط برای ادمین‌ها فعال است.');
+      const id = argText.trim(); if (!id) return tgMessage(env, chatId, 'فرمت: <code>/delete PLACE_ID</code>');
+      const data = await getBotData(env); const place = data.places.find(p=>p.id===id); if (!place) return tgMessage(env, chatId, 'مکان پیدا نشد.');
+      return tgMessage(env, chatId, `مکان <b>${tgEscape(place.name)}</b> حذف شود؟`, { reply_markup: { inline_keyboard: [[{ text: '🗑 بله، حذف شود', callback_data: `del:${id}` }, { text: 'لغو', callback_data: 'delcancel' }]] } });
+    }
+    if (cmd === 'visit') {
+      if (!admin) return tgMessage(env, chatId, '⛔ این دستور فقط برای ادمین‌ها فعال است.');
+      const parts = argText.split('|').map(s=>s.trim()); const [placeId,quality='normal',...notes] = parts; if (!placeId) return tgMessage(env, chatId, 'فرمت: <code>/visit PLACE_ID | good | توضیحات</code>');
+      const saved = await adminMutation(env, 'visit.create', { placeId, quality, note: notes.join(' | ') }, update.update_id); if (saved.result?.duplicate) return;
+      return tgMessage(env, chatId, '✅ بازدید به دفترچه شخصی اضافه شد.');
+    }
+    if (cmd === 'route') {
+      if (!admin) return tgMessage(env, chatId, '⛔ این دستور فقط برای ادمین‌ها فعال است.');
+      const parts = argText.split('|').map(s=>s.trim()); const [name,quality='normal',coordsText='',...notes] = parts;
+      const coordinates = coordsText.split(/[;؛]/).map(parseCoordinates).filter(Boolean).map(p=>[p.lat,p.lng]);
+      if (!name || coordinates.length < 2) return tgMessage(env, chatId, 'فرمت: <code>/route نام مسیر | good | 29.72,52.47;29.73,52.48 | توضیحات</code>');
+      const saved = await adminMutation(env, 'route.create', { name, quality, coordinates, notes: notes.join(' | ') }, update.update_id); if (saved.result?.duplicate) return;
+      return tgMessage(env, chatId, `✅ مسیر ذخیره شد. مسافت خطی تقریبی: ${(saved.result.distanceMeters/1000).toFixed(2)} km`);
+    }
+    if (cmd === 'categoryadd') {
+      if (!admin) return tgMessage(env, chatId, '⛔ فقط ادمین.'); const [name,icon='✦'] = argText.split('|').map(s=>s.trim());
+      const saved=await adminMutation(env,'category.create',{name,icon},update.update_id);if(saved.result?.duplicate)return;return tgMessage(env,chatId,`✅ دسته‌بندی «${tgEscape(name)}» اضافه شد.`);
+    }
+    if (cmd === 'tagadd') {
+      if (!admin) return tgMessage(env, chatId, '⛔ فقط ادمین.'); const saved=await adminMutation(env,'tag.create',{name:argText},update.update_id);if(saved.result?.duplicate)return;return tgMessage(env,chatId,`✅ برچسب «${tgEscape(argText)}» اضافه شد.`);
+    }
+    if (cmd === 'stats') {
+      if (!admin) return tgMessage(env, chatId, '🔒 آمار مسیرها و بازدیدها خصوصی است.'); const data=await getBotData(env);const total=data.routes.reduce((s,r)=>s+(r.distanceMeters||0),0);const good=data.routes.filter(r=>r.quality==='good').length;
+      return tgMessage(env,chatId,`<b>📊 آمار خصوصی اطلس</b>\n📍 مکان‌ها: ${data.places.length}\n🧭 مسیرها: ${data.routes.length}\n✅ بازدیدها: ${data.visits.length}\n🚗 مسافت ثبت‌شده: ${(total/1000).toFixed(1)} km\n🌟 مسیرهای خوب: ${good}`);
+    }
+    return tgMessage(env, chatId, 'دستور شناخته نشد. /help را بفرست.');
+  }
+  // A plain coordinate message is an admin shortcut; non-admin messages receive guidance.
+  const point = parseCoordinates(rawText);
+  if (point) {
+    if (!admin) return tgMessage(env, chatId, 'برای جست‌وجوی نزدیک‌ترین مکان‌ها از /near lat,lng استفاده کن.');
+    const name = coordinateTitle(rawText);
+    const saved = await adminMutation(env, 'place.create', { name, ...point, categoryId: 'hidden', source: 'telegram' }, update.update_id);
+    if (saved.result?.duplicate) return;
+    return tgMessage(env, chatId, `✅ لوکیشن ذخیره شد.\n📍 ${tgEscape(name)}\n<code>${point.lat}, ${point.lng}</code>\nشناسه: <code>${saved.result.id}</code>`);
+  }
+  if (rawText && !rawText.startsWith('/')) return tgMessage(env, chatId, 'پیام دریافت شد. برای ثبت مکان، مختصات را ارسال کن یا /help را ببین.');
+}
+async function handleTelegramCallback(callback, update, env) {
+  const chatId = callback.message?.chat?.id, fromId = callback.from?.id;
+  if (!chatId || !fromId) return;
+  const data = String(callback.data || '');
+  if (data === 'delcancel') { await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id, text: 'حذف لغو شد.' }); return; }
+  if (data.startsWith('del:')) {
+    if (!isAdmin(fromId, env)) { await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id, text: 'دسترسی ادمین ندارید.', show_alert: true }); return; }
+    const id = data.slice(4);
+    try {
+      const saved = await adminMutation(env, 'place.delete', { id }, update.update_id);
+      await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id, text: saved.result?.duplicate ? 'درخواست تکراری بود.' : 'مکان حذف شد.' });
+      if (!saved.result?.duplicate) await tgMessage(env, chatId, `🗑 مکان <code>${tgEscape(id)}</code> حذف شد.`);
+    } catch (error) { await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id, text: error.message, show_alert: true }); }
+  }
+}
+async function telegramWebhook(request, env) {
+  if (!env.TELEGRAM_WEBHOOK_SECRET || request.headers.get('X-Telegram-Bot-Api-Secret-Token') !== env.TELEGRAM_WEBHOOK_SECRET) return text('Forbidden', 403);
+  let update; try { update = await request.json(); } catch { return text('Bad Request', 400); }
+  try {
+    if (update.callback_query) await handleTelegramCallback(update.callback_query, update, env);
+    else if (update.message) await handleTelegramMessage(update.message, update, env);
+    return json({ ok: true });
+  } catch (error) {
+    // Return 200 to Telegram for application-level errors to avoid an infinite retry loop.
+    const chatId = update.message?.chat?.id || update.callback_query?.message?.chat?.id;
+    if (chatId) { try { await tgMessage(env, chatId, `⚠️ عملیات انجام نشد: ${tgEscape(error.message || 'خطای داخلی')}\nتنظیمات اتصال و فایل داده را بررسی کن.`); } catch {} }
+    return json({ ok: true, handled: false });
+  }
+}
+
+async function routeRequest(request, env) {
+  const url = new URL(request.url), path = url.pathname;
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(request, env) });
+  if (path === '/telegram/webhook' && request.method === 'POST') return telegramWebhook(request, env);
+  if (path === '/' && request.method === 'GET') return json({ service: 'Shiraz Atlas API', version: VERSION, health: '/api/health', docs: 'https://github.com/mehrdadmb2/shiraz-atlas' });
+  if (path === '/api/health' && request.method === 'GET') return json({ ok: true, service: 'Shiraz Atlas API', version: VERSION, dataConfigured: Boolean(env.GITHUB_OWNER && env.GITHUB_DATA_REPO && env.GITHUB_TOKEN), botConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_WEBHOOK_SECRET), timestamp: new Date().toISOString() });
+  if (path === '/api/auth/login' && request.method === 'POST') {
+    if (!originAllowed(request, env)) return json({ error: 'Origin مجاز نیست.' }, 403);
+    if (loginRateLimited(request)) return json({ error: 'تعداد تلاش ناموفق زیاد است؛ کمی بعد دوباره تلاش کن.' }, 429);
+    let body; try { body = await request.json(); } catch { return json({ error: 'درخواست ورود نامعتبر است.' }, 400); }
+    if (!await passwordMatches(body?.password || '', env.WEB_ADMIN_PASSWORD || '')) { recordLoginFailure(request); return json({ error: 'رمز عبور صحیح نیست.' }, 401); }
+    clearLoginFailures(request);
+    try { return json({ ok: true, token: await issueToken(env), expiresIn: 28800 }); } catch (error) { return json({ error: error.message }, 500); }
+  }
+  if (path === '/api/auth/logout' && request.method === 'POST') return json({ ok: true });
+  if (path === '/api/state' && request.method === 'GET') {
+    try { const current = await readData(env); return json(publicData(current.data), 200, { 'cache-control': 'public, max-age=30' }); }
+    catch (error) { return json({ error: error.message }, 503); }
+  }
+  if (path === '/api/admin/state' && request.method === 'GET') {
+    if (!await requireAdmin(request, env)) return json({ error: 'نشست ادمین معتبر نیست.' }, 401);
+    try { const current = await readData(env); return json({ ...current.data, isAdmin: true }); }
+    catch (error) { return json({ error: error.message }, 503); }
+  }
+  if (path === '/api/admin/mutate' && request.method === 'POST') return handleMutation(request, env);
+  if (path === '/api/discover' && request.method === 'GET') return discoverNearby(url);
+  if (path === '/api/route' && request.method === 'GET') return routePreview(url);
+  if (path === '/api/weather' && request.method === 'GET') return weatherFor(url);
+  return json({ error: 'مسیر API پیدا نشد.' }, 404);
+}
+
+export default {
+  async fetch(request, env, ctx) {
+    try { return withCors(await routeRequest(request, env), request, env); }
+    catch (error) {
+      const safe = error?.message || 'خطای غیرمنتظره در Worker رخ داد.';
+      return withCors(json({ error: safe }, 500), request, env);
+    }
+  }
+};

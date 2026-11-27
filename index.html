@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07111d">
+  <meta name="description" content="Shiraz Atlas — نقشه شخصی کشف مکان‌ها، برنامه‌ریزی گردش و ثبت مسیرهای شیراز.">
+  <meta property="og:title" content="Shiraz Atlas | اطلس گشت‌وگذار شیراز">
+  <meta property="og:description" content="مکان‌ها را کشف کن، مسیرهایت را ثبت کن و نقشه شخصی شیرازت را بساز.">
+  <meta property="og:image" content="https://mehrdadmb2.github.io/shiraz-atlas/assets/atlas-banner.png">
+  <title>Shiraz Atlas — اطلس گشت‌وگذار شیراز</title>
+  <link rel="icon" type="image/svg+xml" href="assets/atlas-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Vazirmatn:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
+  <link rel="stylesheet" href="css/styles.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+  <script defer src="js/config.js"></script>
+  <script defer src="js/utils.js"></script>
+  <script defer src="js/api.js"></script>
+  <script defer src="js/map.js"></script>
+  <script defer src="js/app.js"></script>
+</head>
+<body>
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div><div class="ambient-grid"></div>
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+  <div id="loading-screen" class="loading-screen">
+    <img src="assets/atlas-mark.svg" alt="Shiraz Atlas" class="loader-mark">
+    <div class="loader-wordmark">SHIRAZ <span>ATLAS</span></div>
+    <div class="loader-line"><i></i></div>
+    <p>در حال آماده‌سازی نقشه شخصی تو...</p>
+  </div>
+
+  <div class="app-shell">
+    <header class="topbar glass">
+      <a class="brand" href="#top" aria-label="Shiraz Atlas Home">
+        <img src="assets/atlas-mark.svg" alt="" class="brand-mark">
+        <span class="brand-copy"><strong>SHIRAZ <em>ATLAS</em></strong><small>YOUR CITY. YOUR STORIES.</small></span>
+      </a>
+      <nav class="top-nav" aria-label="ناوبری اصلی">
+        <button class="nav-link active" data-view="overview"><span>◈</span> نمای کلی</button>
+        <button class="nav-link" data-view="map"><span>⌖</span> نقشه</button>
+        <button class="nav-link" data-view="places"><span>▦</span> مکان‌ها</button>
+        <button class="nav-link" data-view="journeys"><span>⌁</span> مسیرهای من</button>
+        <button class="nav-link" data-view="discover"><span>✧</span> کشف اطراف</button>
+        <button class="nav-link" data-view="insights"><span>▥</span> آمار گشت‌وگذار</button>
+      </nav>
+      <div class="top-actions">
+        <button class="icon-button" id="theme-toggle" title="تغییر تم" aria-label="تغییر تم">☼</button>
+        <button class="icon-button" id="locate-button" title="موقعیت من" aria-label="موقعیت من">⌖</button>
+        <button class="button button-quiet" id="refresh-button">↻ <span>به‌روزرسانی</span></button>
+        <button class="button button-primary" id="auth-button"><span class="status-dot"></span><span id="auth-button-label">ورود ادمین</span></button>
+        <button class="mobile-menu-button" id="mobile-menu-button" aria-label="باز کردن منو">☰</button>
+      </div>
+    </header>
+
+    <div class="mobile-nav glass" id="mobile-nav">
+      <button class="nav-link active" data-view="overview">نمای کلی</button><button class="nav-link" data-view="map">نقشه</button><button class="nav-link" data-view="places">مکان‌ها</button><button class="nav-link" data-view="journeys">مسیرها</button><button class="nav-link" data-view="discover">کشف اطراف</button><button class="nav-link" data-view="insights">آمار</button>
+    </div>
+
+    <main id="top" class="main-shell">
+      <section class="hero-panel glass" id="hero-panel">
+        <div class="hero-copy">
+          <div class="eyebrow"><span class="eyebrow-dot"></span> PERSONAL EXPLORATION SYSTEM <span class="eyebrow-line"></span> SHIRAZ · IRAN</div>
+          <h1>شهر را فقط نبین؛<br><span>کشفش کن.</span></h1>
+          <p>نقشه‌ای برای مکان‌های دوست‌داشتنی، مسیرهای خاطره‌انگیز و گوشه‌هایی که هنوز کشف نکرده‌ای.</p>
+          <div class="hero-actions">
+            <button class="button button-primary button-large" id="hero-explore">⌖ <span>رفتن به نقشه</span></button>
+            <button class="button button-glass button-large" id="hero-random">✧ <span>یک مقصد شانسی</span></button>
+          </div>
+          <div class="hero-meta"><span>✦ Curated by you</span><span>◉ Live map</span><span>⌁ Journey journal</span></div>
+        </div>
+        <div class="hero-art" aria-hidden="true">
+          <div class="orbit orbit-a"></div><div class="orbit orbit-b"></div><div class="orbit orbit-c"></div>
+          <div class="hero-compass"><div class="compass-ring"><div class="compass-needle"></div><span class="north">N</span><span class="east">E</span><span class="south">S</span><span class="west">W</span></div><div class="compass-pin">⌖</div></div>
+          <div class="floating-chip chip-top"><i>✦</i><span>DISCOVER</span></div>
+          <div class="floating-chip chip-bottom"><i>◉</i><span>YOUR NEXT SPOT</span></div>
+          <div class="hero-coordinate">29° 35' 30" N<br>52° 31' 00" E</div>
+        </div>
+        <div class="hero-bottom-glow"></div>
+      </section>
+
+      <section class="stats-strip" aria-label="آمار کلی">
+        <article class="stat-card glass"><div class="stat-icon teal">⌖</div><div><span class="stat-label">مکان‌های ذخیره‌شده</span><strong id="stat-places">—</strong><small>در اطلس شخصی</small></div><b class="stat-spark">↗</b></article>
+        <article class="stat-card glass"><div class="stat-icon purple">⌁</div><div><span class="stat-label">مسیرهای ثبت‌شده</span><strong id="stat-routes">—</strong><small>ردپای ماجراجویی</small></div><b class="stat-spark">↗</b></article>
+        <article class="stat-card glass"><div class="stat-icon amber">✧</div><div><span class="stat-label">بازدیدهای ثبت‌شده</span><strong id="stat-visits">—</strong><small>خاطرات روی نقشه</small></div><b class="stat-spark">↗</b></article>
+        <article class="stat-card glass coverage-stat"><div class="stat-icon green">◌</div><div><span class="stat-label">پوشش محدوده گشت</span><strong id="stat-coverage">۰٪</strong><small>تخمین بر اساس مسیرهای ثبت‌شده</small></div><div class="mini-progress"><i id="coverage-mini-bar"></i></div></article>
+      </section>
+
+      <div class="content-grid">
+        <aside class="sidebar-column">
+          <section class="side-card glass weather-card">
+            <div class="card-heading"><div><span class="mini-kicker">SHIRAZ WEATHER</span><h3>هوای همین حوالی</h3></div><span class="weather-symbol" id="weather-icon">☀</span></div>
+            <div class="weather-main"><strong id="weather-temp">—°</strong><div><b id="weather-desc">در حال دریافت...</b><small id="weather-feels">احساس واقعی —</small></div></div>
+            <div class="weather-details"><span>💧 <b id="weather-humidity">—</b><small>رطوبت</small></span><span>↗ <b id="weather-wind">—</b><small>باد</small></span><span>☂ <b id="weather-rain">—</b><small>بارش</small></span></div>
+            <div class="weather-footer"><span id="weather-location">شیراز، ایران</span><a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Weather by Open-Meteo ↗</a></div>
+          </section>
+
+          <section class="side-card glass quick-card">
+            <div class="card-heading"><div><span class="mini-kicker">QUICK ACTIONS</span><h3>شروع یک ماجراجویی</h3></div><span class="heading-spark">✦</span></div>
+            <button class="quick-action" id="quick-random"><span class="quick-icon q-purple">✧</span><span><b>مقصد تصادفی</b><small>بذار اطلس غافلگیرت کنه</small></span><i>←</i></button>
+            <button class="quick-action" id="quick-near"><span class="quick-icon q-teal">⌖</span><span><b>مکان‌های نزدیک من</b><small>بر اساس موقعیت فعلی</small></span><i>←</i></button>
+            <button class="quick-action" id="quick-route"><span class="quick-icon q-amber">⌁</span><span><b>ثبت مسیر جدید</b><small>رد مسیرت را روی نقشه بکش</small></span><i>←</i></button>
+          </section>
+
+          <section class="side-card glass category-card">
+            <div class="card-heading"><div><span class="mini-kicker">EXPLORE BY MOOD</span><h3>دسته‌بندی‌ها</h3></div><button class="text-button" id="clear-filters">پاک‌کردن</button></div>
+            <div id="category-filter-list" class="category-filter-list"><div class="empty-mini">در حال بارگذاری دسته‌بندی‌ها...</div></div>
+            <div class="tag-divider"></div>
+            <div class="tag-heading"><b>برچسب‌های خاص</b><span>قابل تنظیم</span></div>
+            <div id="tag-filter-list" class="tag-filter-list"></div>
+          </section>
+
+          <section class="side-card glass bot-card">
+            <div class="bot-orb">✦</div><div class="bot-copy"><b>اطلس همیشه همراهته</b><small>از تلگرام مکان ثبت کن یا مقصد بعدی را بگیر.</small><a href="https://t.me/ShirazAtlasBot" target="_blank" rel="noreferrer">باز کردن ربات تلگرام ↗</a></div>
+          </section>
+        </aside>
+
+        <div class="primary-column">
+          <section class="section-block map-section" id="map-section">
+            <div class="section-heading">
+              <div><span class="mini-kicker">THE CITY IS YOUR CANVAS</span><h2>نقشه <em>اکتشاف</em></h2><p>مکان‌ها، رد مسیرها و جاهایی که هنوز منتظر کشف شدن‌اند.</p></div>
+              <div class="map-actions"><button class="button button-quiet" id="map-layer-toggle">◐ <span>تغییر نقشه</span></button><button class="button button-outline" id="draw-route-button">＋ <span>ثبت مسیر</span></button></div>
+            </div>
+            <div class="map-toolbar glass"><div class="map-search"><span>⌕</span><input id="map-search-input" type="search" placeholder="جست‌وجوی نام مکان، محله یا برچسب..." autocomplete="off"><kbd>/</kbd></div><div class="map-toolbar-right"><span class="map-legend"><i class="legend-dot saved"></i> مکان‌ها</span><span class="map-legend"><i class="legend-line visited"></i> مسیرهای بازدید</span><span class="map-legend"><i class="legend-dot me"></i> موقعیت من</span></div></div>
+            <div class="map-frame glass"><div id="atlas-map" role="application" aria-label="نقشه تعاملی شیراز"></div><div class="map-corner-label"><span class="pulse-dot"></span> LIVE ATLAS <small>SHIRAZ / IR</small></div><div class="map-zoom-hint">برای افزودن نقطه در حالت ثبت مسیر، روی نقشه کلیک کن</div><div class="map-drawing-bar hidden" id="map-drawing-bar"><span id="drawing-count">۰ نقطه ثبت شده</span><button id="gps-point-button">＋ یک نقطه GPS</button><button id="gps-track-button">◉ شروع GPS زنده</button><button id="finish-drawing-button" class="button-primary">پایان و ذخیره</button><button id="cancel-drawing-button">لغو</button></div></div>
+            <div class="map-footer"><span><b id="map-visible-count">۰</b> مکان قابل نمایش</span><span>نقشه و داده‌های جغرافیایی © OpenStreetMap contributors</span><button class="text-button" id="fit-map-button">نمایش همه مکان‌ها ⤢</button></div>
+          </section>
+
+          <section class="section-block places-section" id="places-section">
+            <div class="section-heading compact-heading"><div><span class="mini-kicker">YOUR PERSONAL COLLECTION</span><h2>مکان‌های <em>منتخب</em></h2><p>مقصدهایی که ذخیره کرده‌ای یا می‌خواهی به آن‌ها سر بزنی.</p></div><div class="section-heading-actions"><span class="result-count" id="places-result-count">۰ نتیجه</span><button class="button button-outline admin-only hidden" id="add-place-button">＋ افزودن مکان</button></div></div>
+            <div class="places-toolbar glass"><div class="filter-search"><span>⌕</span><input id="places-search-input" type="search" placeholder="جست‌وجو در مکان‌ها..."></div><select id="places-sort" aria-label="مرتب‌سازی"><option value="newest">جدیدترین</option><option value="name">نام مکان</option><option value="fee-low">کم‌هزینه‌ترین</option><option value="rating">بالاترین امتیاز</option></select><label class="toggle-label"><input type="checkbox" id="visited-filter"><span class="toggle-ui"></span> فقط بازدیدشده‌ها</label></div>
+            <div class="place-grid" id="place-grid"><div class="empty-state glass"><span>⌖</span><h3>هنوز مکانی ذخیره نشده</h3><p>از ربات تلگرام یک لوکیشن بفرست یا از پنل ادمین اولین مکان را اضافه کن.</p></div></div>
+            <div class="load-more-wrap hidden" id="load-more-wrap"><button class="button button-quiet" id="load-more-button">نمایش مکان‌های بیشتر ↓</button></div>
+          </section>
+
+          <section class="section-block discover-section hidden" id="discover-section">
+            <div class="section-heading"><div><span class="mini-kicker">NEARBY OPEN DATA</span><h2>کشف <em>اطراف</em></h2><p>مکان‌های ثبت‌شده در نقشه‌های عمومی اطراف موقعیت انتخابی تو.</p></div><div class="discover-controls"><select id="discover-radius"><option value="1500">۱.۵ کیلومتر</option><option value="3000" selected>۳ کیلومتر</option><option value="5000">۵ کیلومتر</option><option value="10000">۱۰ کیلومتر</option></select><button class="button button-primary" id="discover-button">✧ جست‌وجوی اطراف</button></div></div>
+            <div class="discover-note glass">این پیشنهادها از داده‌های OpenStreetMap می‌آیند؛ کامل بودن اطلاعات، قیمت و ساعت کاری تضمین‌شده نیست. قبل از مراجعه جزئیات را بررسی کن.</div>
+            <div class="place-grid" id="discover-grid"><div class="empty-state glass"><span>✧</span><h3>اطراف را کشف کن</h3><p>موقعیت فعلی یا مرکز نقشه را انتخاب کن و مکان‌های نزدیک را پیدا کن.</p></div></div>
+          </section>
+
+          <section class="section-block journeys-section hidden" id="journeys-section">
+            <div class="section-heading"><div><span class="mini-kicker">YOUR FOOTPRINTS</span><h2>دفترچه <em>مسیرها</em></h2><p>هر مسیر یک خاطره است؛ کیفیت، مسافت و یادداشتش را ثبت کن.</p></div><button class="button button-primary admin-only hidden" id="journey-add-button">＋ مسیر جدید</button></div>
+            <div class="journey-summary glass"><div><span>مسافت ثبت‌شده</span><strong id="journey-distance">۰ km</strong></div><div><span>میانگین کیفیت مسیر</span><strong id="journey-quality">—</strong></div><div><span>آخرین ماجراجویی</span><strong id="journey-last">—</strong></div><div class="journey-summary-icon">⌁</div></div>
+            <div class="journey-list" id="journey-list"><div class="empty-state glass"><span>⌁</span><h3>هنوز مسیری ثبت نشده</h3><p>از روی نقشه نقطه‌های مسیر را مشخص کن یا با GPS مسیرت را ضبط کن.</p></div></div>
+          </section>
+
+          <section class="section-block insights-section hidden" id="insights-section">
+            <div class="section-heading"><div><span class="mini-kicker">YOUR EXPLORATION DATA</span><h2>آمار <em>گشت‌وگذار</em></h2><p>تصویری از جاهایی که دیده‌ای و مسیرهایی که طی کرده‌ای.</p></div><span class="privacy-label">🔒 آمار شخصی برای ادمین</span></div>
+            <div class="insight-grid"><article class="insight-card glass"><span class="mini-kicker">VISITED PLACES</span><strong id="insight-visited">۰</strong><small>مکان بازدیدشده</small><div class="insight-bottom"><span>از کل مکان‌ها</span><b id="insight-visited-rate">۰٪</b></div><div class="progress-track"><i id="insight-visited-bar"></i></div></article><article class="insight-card glass"><span class="mini-kicker">EXPLORATION GRID</span><strong id="insight-coverage">۰٪</strong><small>پوشش تقریبی محدوده گشت</small><div class="insight-bottom"><span>بر پایه مسیرهای ثبت‌شده</span><b>تقریبی</b></div><div class="progress-track"><i id="insight-coverage-bar"></i></div></article><article class="insight-card glass"><span class="mini-kicker">TOTAL DISTANCE</span><strong id="insight-distance">۰</strong><small>کیلومتر مسیر ثبت‌شده</small><div class="insight-bottom"><span>مجموع مسیرها</span><b>km</b></div><div class="progress-track"><i id="insight-distance-bar"></i></div></article></div>
+            <div class="analytics-grid"><article class="analytics-panel glass"><div class="card-heading"><div><span class="mini-kicker">VISIT QUALITY</span><h3>کیفیت تجربه مسیرها</h3></div></div><div class="quality-bars" id="quality-bars"><p class="muted">هنوز داده‌ای برای تحلیل وجود ندارد.</p></div></article><article class="analytics-panel glass"><div class="card-heading"><div><span class="mini-kicker">TOP CATEGORIES</span><h3>دسته‌بندی‌های محبوب</h3></div></div><div id="category-stats" class="category-stats"><p class="muted">پس از ثبت مکان و بازدید، آمار نمایش داده می‌شود.</p></div></article></div>
+            <article class="visit-history-panel glass"><div class="card-heading"><div><span class="mini-kicker">PERSONAL VISIT JOURNAL</span><h3>تاریخچه بازدیدها</h3></div><span class="privacy-label">🔒 خصوصی</span></div><div id="visit-history-list" class="visit-history-list"><p class="muted">برای مشاهده دفترچه خصوصی بازدیدها وارد پنل ادمین شو.</p></div></article>
+            <div class="coverage-disclaimer glass">درصد پوشش، تخمین شبکه‌ای از محدوده گشت تعریف‌شده در تنظیمات اطلس است؛ معادل درصد رسمی مساحت شهرداری شیراز نیست. برای دقت جغرافیایی بالاتر می‌توانیم مرز رسمی شهر را در نسخه بعد به GeoJSON اضافه کنیم.</div>
+          </section>
+        </div>
+      </div>
+
+      <footer class="site-footer"><div class="footer-brand"><img src="assets/atlas-mark.svg" alt=""><b>SHIRAZ <em>ATLAS</em></b></div><span>ساخته‌شده برای کشف لحظه‌های تازه در شهر راز</span><div class="footer-links"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap</a><a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Weather data</a><a href="https://t.me/ShirazAtlasBot" target="_blank" rel="noreferrer">Telegram Bot ↗</a></div></footer>
+    </main>
+  </div>
+
+  <!-- Login modal -->
+  <div class="modal-backdrop hidden" id="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
+    <div class="modal glass modal-narrow"><button class="modal-close" data-close="login-modal" aria-label="بستن">×</button><div class="modal-emblem">⌑</div><span class="mini-kicker">PRIVATE CONTROL ROOM</span><h2 id="login-title">ورود مدیر اطلس</h2><p class="modal-subtitle">برای مدیریت اطلاعات و مشاهده مسیرهای خصوصی، رمز ادمین را وارد کن.</p><form id="login-form"><label class="field-label">رمز عبور ادمین<input id="admin-password" type="password" autocomplete="current-password" required minlength="1" placeholder="رمز ورود..." dir="auto"></label><div class="form-error" id="login-error"></div><button class="button button-primary button-block" type="submit">ورود امن به پنل <span>↗</span></button></form><small class="modal-footnote">🔒 رمز در مرورگر ذخیره نمی‌شود؛ فقط نشست موقت امضاشده نگه‌داری می‌شود.</small></div>
+  </div>
+
+  <!-- Place modal -->
+  <div class="modal-backdrop hidden" id="place-modal" role="dialog" aria-modal="true" aria-labelledby="place-modal-title">
+    <div class="modal glass modal-wide"><button class="modal-close" data-close="place-modal" aria-label="بستن">×</button><div class="modal-heading"><div><span class="mini-kicker">ATLAS COLLECTION</span><h2 id="place-modal-title">افزودن مکان جدید</h2><p>اطلاعات مقصد را ثبت کن؛ هر زمان خواستی قابل ویرایش است.</p></div><span class="modal-icon">⌖</span></div>
+      <form id="place-form" class="form-grid">
+        <input type="hidden" id="place-id">
+        <label class="field-label span-2">نام مکان *<input id="place-name" required maxlength="120" placeholder="مثلاً باغ ارم"></label>
+        <label class="field-label">دسته‌بندی<select id="place-category"></select></label>
+        <label class="field-label">وضعیت مکان<select id="place-status"><option value="active">فعال / قابل مراجعه</option><option value="planned">در لیست بازدید</option><option value="closed">تعطیل یا نامشخص</option></select></label>
+        <label class="field-label">عرض جغرافیایی (Latitude) *<input id="place-lat" required inputmode="decimal" placeholder="29.6225" dir="ltr"></label>
+        <label class="field-label">طول جغرافیایی (Longitude) *<input id="place-lng" required inputmode="decimal" placeholder="52. ..." dir="ltr"></label>
+        <label class="field-label span-2">آدرس / محله<input id="place-address" maxlength="250" placeholder="شیراز، ..."></label>
+        <label class="field-label span-2">توضیحات<textarea id="place-description" rows="2" maxlength="1200" placeholder="چه چیزی این مکان را جذاب می‌کند؟"></textarea></label>
+        <label class="field-label">هزینه ورودی (تومان)<input id="place-entry-fee" inputmode="numeric" type="number" min="0" placeholder="۰"></label>
+        <label class="field-label">هزینه تقریبی هر نفر (تومان)<input id="place-estimated-cost" inputmode="numeric" type="number" min="0" placeholder="نامشخص"></label>
+        <label class="field-label">امتیاز شخصی (از ۵)<input id="place-rating" type="number" min="0" max="5" step="0.1" placeholder="مثلاً ۴.۵"></label>
+        <label class="field-label">بهترین زمان مراجعه<input id="place-best-time" maxlength="120" placeholder="عصر، غروب، آخر هفته..."></label>
+        <label class="field-label">شماره تماس<input id="place-phone" type="tel" dir="ltr" placeholder="۰۷۱..."></label>
+        <label class="field-label">وب‌سایت / لینک<input id="place-website" type="url" dir="ltr" placeholder="https://..."></label>
+        <label class="field-label span-2">برچسب‌ها (با کاما جدا کن)<input id="place-tags" placeholder="دوستانه، Skybit، طبیعت"></label>
+        <label class="field-label span-2">لینک تصویر (اختیاری)<input id="place-image" type="url" dir="ltr" placeholder="https://..."></label>
+        <label class="field-label span-2">یادداشت خصوصی<textarea id="place-notes" rows="2" maxlength="1200" placeholder="نکات شخصی، پارکینگ، تجربه قبلی..."></textarea></label>
+        <label class="checkbox-field span-2"><input id="place-public" type="checkbox" checked><span>نمایش این مکان در نقشه عمومی</span></label>
+        <div class="form-actions span-2"><button type="button" class="button button-quiet" data-close="place-modal">انصراف</button><button type="submit" class="button button-primary">ذخیره مکان <span>↗</span></button></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Visit modal -->
+  <div class="modal-backdrop hidden" id="visit-modal" role="dialog" aria-modal="true" aria-labelledby="visit-title"><div class="modal glass modal-narrow"><button class="modal-close" data-close="visit-modal">×</button><span class="mini-kicker">JOURNAL A VISIT</span><h2 id="visit-title">ثبت بازدید</h2><p id="visit-place-name" class="modal-subtitle"></p><form id="visit-form"><input type="hidden" id="visit-place-id"><input type="hidden" id="visit-id"><label class="field-label">کیفیت تجربه<select id="visit-quality"><option value="good">عالی / خوب</option><option value="normal" selected>معمولی</option><option value="bad">ضعیف / بد</option></select></label><label class="field-label">تاریخ بازدید<input id="visit-date" type="datetime-local"></label><label class="field-label">یادداشت تجربه<textarea id="visit-note" rows="3" placeholder="چه چیزی خوب بود؟ چه چیزی نه؟"></textarea></label><label class="field-label">مدت حضور (دقیقه)<input id="visit-duration" type="number" min="0" placeholder="مثلاً ۹۰"></label><div class="form-actions"><button type="button" class="button button-quiet" data-close="visit-modal">انصراف</button><button type="submit" class="button button-primary">ثبت بازدید</button></div></form></div></div>
+
+  <!-- Route modal -->
+  <div class="modal-backdrop hidden" id="route-modal" role="dialog" aria-modal="true" aria-labelledby="route-title"><div class="modal glass modal-narrow"><button class="modal-close" data-close="route-modal">×</button><span class="mini-kicker">JOURNEY RECORDER</span><h2 id="route-title">ذخیره مسیر پیموده‌شده</h2><p class="modal-subtitle" id="route-point-summary">نقطه‌های انتخاب‌شده روی نقشه</p><form id="route-form"><label class="field-label">نام مسیر<input id="route-name" required maxlength="120" placeholder="مثلاً دورهمی جمعه در بلوار چمران"></label><label class="field-label">کیفیت مسیر<select id="route-quality"><option value="good">خوب</option><option value="normal" selected>نرمال</option><option value="bad">بد</option></select></label><label class="field-label">نوع حرکت<select id="route-mode"><option value="driving">خودرو</option><option value="walking">پیاده</option><option value="cycling">دوچرخه</option><option value="motorcycle">موتور</option><option value="other">سایر</option></select></label><label class="field-label">تاریخ و زمان مسیر<input id="route-date" type="datetime-local"></label><label class="field-label">توضیحات و تجربه<textarea id="route-notes" rows="3" placeholder="ترافیک، کیفیت مسیر، منظره، همراهان..."></textarea></label><label class="checkbox-field"><input id="route-private" type="checkbox" checked><span>این مسیر خصوصی باشد (پیشنهادی)</span></label><div class="form-actions"><button type="button" class="button button-quiet" data-close="route-modal">انصراف</button><button type="submit" class="button button-primary">ذخیره مسیر</button></div></form></div></div>
+
+  <!-- Catalog modal -->
+  <div class="modal-backdrop hidden" id="catalog-modal" role="dialog" aria-modal="true" aria-labelledby="catalog-title"><div class="modal glass modal-wide"><button class="modal-close" data-close="catalog-modal">×</button><span class="mini-kicker">CUSTOMIZE YOUR ATLAS</span><h2 id="catalog-title">مدیریت دسته‌بندی و برچسب</h2><p class="modal-subtitle">دسته‌بندی‌ها و برچسب‌ها مستقل‌اند؛ هر زمان می‌توانی موارد جدید بسازی یا تغییرشان بدهی.</p><div class="catalog-columns"><div><h3>دسته‌بندی‌ها</h3><form id="category-form" class="inline-create"><input id="category-name" placeholder="نام دسته جدید" required><input id="category-icon" placeholder="ایموجی" maxlength="4" value="✦"><button class="button button-primary" type="submit">＋</button></form><div id="category-manager-list" class="manager-list"></div></div><div><h3>برچسب‌های خاص</h3><form id="tag-form" class="inline-create"><input id="tag-name" placeholder="نام برچسب جدید" required><button class="button button-primary" type="submit">＋</button></form><div id="tag-manager-list" class="manager-list"></div></div></div>
+      <div class="bounds-editor"><h3>محدوده محاسبه پوشش گشت</h3><p>این مستطیل برای تخمین شبکه‌ای است و مرز رسمی شهرداری نیست.</p><form id="bounds-form" class="bounds-grid"><label class="field-label">جنوب (South)<input id="bound-south" type="number" step="0.0001"></label><label class="field-label">غرب (West)<input id="bound-west" type="number" step="0.0001"></label><label class="field-label">شمال (North)<input id="bound-north" type="number" step="0.0001"></label><label class="field-label">شرق (East)<input id="bound-east" type="number" step="0.0001"></label><label class="field-label">اندازه سلول (درجه)<input id="bound-step" type="number" min="0.001" max="0.05" step="0.001"></label><button class="button button-outline" type="submit">ذخیره محدوده</button></form></div>
+      <div class="form-actions"><button class="button button-quiet" data-close="catalog-modal">بستن</button></div></div></div>
+
+  <script>
+    window.addEventListener('error', (event) => {
+      const root = document.getElementById('toast-root');
+      if (!root || !event.message) return;
+      const item = document.createElement('div'); item.className = 'toast error'; item.textContent = 'خطای رابط کاربری: ' + event.message; root.appendChild(item); setTimeout(() => item.remove(), 6500);
+    });
+  </script>
+</body>
+</html>
