@@ -1,0 +1,42 @@
+name: Shiraz Atlas Worker Regression Tests
+
+on:
+  pull_request:
+    paths:
+      - 'worker/**'
+      - 'js/**'
+      - 'index.html'
+      - 'sw.js'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shiraz-atlas-worker-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        working-directory: worker
+        run: npm install --no-audit --no-fund
+      - name: Run regression tests
+        working-directory: worker
+        run: npm test
+      - name: Check JavaScript syntax
+        run: |
+          node --check worker/src/index.js
+          node --check js/config.js
+          node --check js/utils.js
+          node --check js/api.js
+          node --check js/map.js
+          node --check js/app.js

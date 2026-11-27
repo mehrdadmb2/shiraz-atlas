@@ -15,7 +15,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Worker dependencies
+        working-directory: worker
+        run: npm install --no-audit --no-fund
+      - name: Run Worker regression tests
+        working-directory: worker
+        run: npm test
+      - name: Check frontend JavaScript syntax
+        run: |
+          node --check js/config.js
+          node --check js/utils.js
+          node --check js/api.js
+          node --check js/map.js
+          node --check js/app.js
+
   deploy:
+    needs: validate
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
