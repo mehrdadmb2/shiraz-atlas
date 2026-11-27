@@ -144,8 +144,8 @@
           </section>
 
           <section class="section-block places-section" id="places-section">
-            <div class="section-heading compact-heading"><div><span class="mini-kicker">YOUR PERSONAL COLLECTION</span><h2>مکان‌های <em>منتخب</em></h2><p>مقصدهایی که ذخیره کرده‌ای یا می‌خواهی به آن‌ها سر بزنی.</p></div><div class="section-heading-actions"><span class="result-count" id="places-result-count">۰ نتیجه</span><button class="button button-outline admin-only hidden" id="add-place-button">＋ افزودن مکان</button></div></div>
-            <div class="places-toolbar glass"><div class="filter-search"><span>⌕</span><input id="places-search-input" type="search" placeholder="جست‌وجو در مکان‌ها..."></div><select id="places-sort" aria-label="مرتب‌سازی"><option value="newest">جدیدترین</option><option value="name">نام مکان</option><option value="fee-low">کم‌هزینه‌ترین</option><option value="rating">بالاترین امتیاز</option></select><label class="toggle-label"><input type="checkbox" id="visited-filter"><span class="toggle-ui"></span> فقط بازدیدشده‌ها</label></div>
+            <div class="section-heading compact-heading"><div><span class="mini-kicker">YOUR PERSONAL COLLECTION</span><h2>مکان‌های <em>منتخب</em></h2><p>مقصدهایی که ذخیره کرده‌ای یا می‌خواهی به آن‌ها سر بزنی.</p></div><div class="section-heading-actions"><span class="result-count" id="places-result-count">۰ نتیجه</span><button class="button button-quiet admin-only hidden" id="duplicates-button">⟲ بررسی تکراری‌ها</button><button class="button button-outline admin-only hidden" id="add-place-button">＋ افزودن مکان</button></div></div>
+            <div class="places-toolbar glass"><div class="filter-search"><span>⌕</span><input id="places-search-input" type="search" placeholder="جست‌وجو در مکان‌ها..."></div><select id="places-sort" aria-label="مرتب‌سازی"><option value="newest">جدیدترین</option><option value="name">نام مکان</option><option value="fee-low">کم‌هزینه‌ترین</option><option value="rating">بالاترین امتیاز</option></select><label class="toggle-label"><input type="checkbox" id="visited-filter"><span class="toggle-ui"></span> فقط بازدیدشده‌ها</label><select id="access-filter" aria-label="روش دسترسی"><option value="">همه روش‌های دسترسی</option><option value="walking">🚶 مناسب پیاده‌روی</option><option value="car">🚗 دسترسی با خودرو</option><option value="motorcycle">🏍️ دسترسی با موتور</option><option value="public_transport">🚌 حمل‌ونقل عمومی</option><option value="bicycle">🚲 دسترسی با دوچرخه</option></select></div>
             <div class="place-grid" id="place-grid"><div class="empty-state glass"><span>⌖</span><h3>هنوز مکانی ذخیره نشده</h3><p>از ربات تلگرام یک لوکیشن بفرست یا از پنل ادمین اولین مکان را اضافه کن.</p></div></div>
             <div class="load-more-wrap hidden" id="load-more-wrap"><button class="button button-quiet" id="load-more-button">نمایش مکان‌های بیشتر ↓</button></div>
           </section>
@@ -200,11 +200,27 @@
         <label class="field-label">شماره تماس<input id="place-phone" type="tel" dir="ltr" placeholder="۰۷۱..."></label>
         <label class="field-label">وب‌سایت / لینک<input id="place-website" type="url" dir="ltr" placeholder="https://..."></label>
         <label class="field-label span-2">برچسب‌ها (با کاما جدا کن)<input id="place-tags" placeholder="دوستانه، Skybit، طبیعت"></label>
+        <fieldset class="access-mode-field span-2"><legend>🚶 روش مناسب دسترسی به مکان</legend><p>یک یا چند روش را انتخاب کن؛ اگر مطمئن نیستی چیزی انتخاب نکن.</p><div class="access-mode-options">
+          <label><input type="checkbox" name="place-access-mode" value="walking"><span>🚶 پیاده‌روی</span></label>
+          <label><input type="checkbox" name="place-access-mode" value="car"><span>🚗 خودرو / سواری</span></label>
+          <label><input type="checkbox" name="place-access-mode" value="motorcycle"><span>🏍️ موتورسیکلت</span></label>
+          <label><input type="checkbox" name="place-access-mode" value="public_transport"><span>🚌 حمل‌ونقل عمومی</span></label>
+          <label><input type="checkbox" name="place-access-mode" value="bicycle"><span>🚲 دوچرخه</span></label>
+        </div></fieldset>
+        <label class="field-label span-2">توضیح دسترسی / پارکینگ<input id="place-access-notes" maxlength="500" placeholder="مثلاً ورود خودرو محدود است؛ پارکینگ در خیابان فرعی قرار دارد."></label>
         <label class="field-label span-2">لینک تصویر (اختیاری)<input id="place-image" type="url" dir="ltr" placeholder="https://..."></label>
         <label class="field-label span-2">یادداشت خصوصی<textarea id="place-notes" rows="2" maxlength="1200" placeholder="نکات شخصی، پارکینگ، تجربه قبلی..."></textarea></label>
         <label class="checkbox-field span-2"><input id="place-public" type="checkbox" checked><span>نمایش این مکان در نقشه عمومی</span></label>
         <div class="form-actions span-2"><button type="button" class="button button-quiet" data-close="place-modal">انصراف</button><button type="submit" class="button button-primary">ذخیره مکان <span>↗</span></button></div>
       </form>
+    </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="duplicate-manager-modal" role="dialog" aria-modal="true" aria-labelledby="duplicate-manager-title">
+    <div class="modal glass modal-wide"><button class="modal-close" data-close="duplicate-manager-modal" aria-label="بستن">×</button>
+      <div class="modal-heading"><div><span class="mini-kicker">DATA CLEANUP / SPATIAL MATCHING</span><h2 id="duplicate-manager-title">بررسی مکان‌های تکراری</h2><p>مکان‌های نزدیک‌تر از آستانه انتخابی بررسی می‌شوند. در ادغام، یک مکان اصلی می‌ماند و سابقهٔ بازدیدها حفظ می‌شود.</p></div><span class="modal-icon">⟲</span></div>
+      <div class="duplicate-toolbar"><label class="field-label">آستانه فاصله<select id="duplicate-threshold"><option value="25">۲۵ متر (سخت‌گیرانه)</option><option value="35" selected>۳۵ متر (پیشنهادی)</option><option value="50">۵۰ متر (حساس‌تر)</option></select></label><button class="button button-primary" id="duplicate-scan-button">⌕ اسکن دوباره</button></div>
+      <div id="duplicate-summary" class="duplicate-summary">برای شروع، دکمه اسکن را بزن.</div><div id="duplicate-groups" class="duplicate-groups"></div>
     </div>
   </div>
 

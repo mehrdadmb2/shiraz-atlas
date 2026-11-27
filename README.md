@@ -10,7 +10,7 @@
     <a href="https://shiraz-atlas.game-developer-mb.workers.dev/api/health"><img src="https://img.shields.io/website?url=https%3A%2F%2Fshiraz-atlas.game-developer-mb.workers.dev%2Fapi%2Fhealth&label=API%20health&style=for-the-badge" alt="API health"></a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/Version-1.2.0-8b7cff?style=flat-square">
+    <img src="https://img.shields.io/badge/Version-1.3.0-8b7cff?style=flat-square">
     <img src="https://img.shields.io/badge/Frontend-GitHub%20Pages-181717?style=flat-square&logo=github">
     <img src="https://img.shields.io/badge/API-Cloudflare%20Workers-F38020?style=flat-square&logo=cloudflare">
     <img src="https://img.shields.io/badge/Map-Leaflet%20%2B%20OSM-72b85a?style=flat-square">
@@ -35,7 +35,9 @@ The public GitHub Pages frontend talks to a Cloudflare Worker. The Worker is the
 |---|---|
 | 🗺️ Interactive atlas | Leaflet map, keyless OSM base, automatic tile-source fallback, place markers, route overlays and category/tag filters |
 | 📴 Offline resilience | Service Worker keeps the app shell and successfully viewed map tiles on the same device; no prohibited bulk tile prefetch |
-| 📍 Place library | Create, edit, delete, coordinates, images, entry fees, estimated costs, ratings and notes |
+| 📍 Place library | Create, edit, delete, coordinates, images, entry fees, estimated costs, ratings, notes and contact information |
+| 🧹 Duplicate cleanup | Admin scan at 25m / 35m / 50m, duplicate warning on create/move, confirmed merge with visit-history reassignment |
+| 🚶 Travel access | Classify places for walking, car, motorcycle, public transport and bicycle; filter the collection by access mode |
 | 🏷️ Organization | Editable categories and independent tags; starter tags include دوستانه، پشتو، تاریک، Skybit |
 | 🧭 Route journal | Route coordinates, distance estimate, travel mode, quality and private notes |
 | ✅ Visit journal | Visit history, date, quality, duration and private notes |
@@ -43,6 +45,7 @@ The public GitHub Pages frontend talks to a Cloudflare Worker. The Worker is the
 | 🎲 Discovery | Random destination, nearby OpenStreetMap discovery and search |
 | 🌤️ Context | Current weather, feels-like temperature, humidity, wind, precipitation and three-day forecast; direct API fallback and last-known local data |
 | 🤖 Telegram UX | Inline keyboards, quick actions, location sharing, admin menu and command shortcuts |
+| ✏️ Telegram field editor | Choose a place and a field button, then send only its new value; no edit command or place ID required |
 | 👥 Admin delegation | Owner can add/remove Telegram admins from the bot without editing code |
 | 🧪 Diagnostics | `/test` and authenticated `/api/admin/diagnostics` inspect Worker configuration, private GitHub data and Telegram webhook |
 | 🔐 Privacy | Website admin sessions, Telegram numeric-ID authorization, private-by-default trips and data isolation |
@@ -82,13 +85,13 @@ Open [@ShirazAtlasBot](https://t.me/ShirazAtlasBot) and send `/start`. Use the i
 | `/random` | 🎲 Random destination; optional category/tag |
 | `/near lat,lng` | 📌 Nearby saved places |
 | `/categories` / `/weather` | 🗂 Categories and 🌤 weather |
-| `/add` / `/edit` / `/delete` | 🔐 Place administration |
+| `/add` / `/delete` | 🔐 Place administration |
 | `/visit` / `/route` | ✅ Record visits and routes |
 | `/stats` | 📊 Private statistics |
 | `/test` | 🧪 Service health checks |
 | `/admins` / `/adminadd` / `/adminremove` | 👑 Owner-only admin management |
 
-Send a Telegram Location or coordinates such as `29.722356, 52.470975` or DMS coordinates to quickly save a place (admins only). Full Persian command reference: [`botfather-commands.txt`](botfather-commands.txt).
+Send a Telegram Location or coordinates such as `29.722356, 52.470975` or DMS coordinates to quickly save a place (admins only). For editing, open `/places`, tap a place, choose the field, and send the new value as a normal message. Full Persian command reference: [`botfather-commands.txt`](botfather-commands.txt).
 
 ### Admin delegation
 
@@ -158,3 +161,18 @@ The Service Worker stores the app shell, Leaflet runtime, the public map snapsho
 ## 🌤️ Weather fallback
 
 The browser first asks the Cloudflare Worker for current conditions and a three-day forecast. If the Worker path fails, it makes a direct Open-Meteo request. The last successful response is retained locally for up to 12 hours, with a visible stale-data indicator. The card changes its atmosphere according to weather code, day/night, temperature, the Shiraz season and the local weekend.
+
+
+## v1.3.0 · Duplicate cleanup & travel access
+
+- Admin duplicate scan with 25m / 35m / 50m thresholds; merge keeps the best-populated canonical record and preserves visit history.
+- Create/move duplicate warning with explicit confirmation.
+- Per-place mobility access metadata: walking, car, motorcycle, public transport, bicycle.
+- Telegram inline edit flow: tap a field and send only its new value.
+
+
+## v1.3.0 — Duplicate cleanup & travel access
+
+The admin site now includes **⟲ بررسی تکراری‌ها** with 25m / 35m / 50m thresholds. A merge keeps one canonical place, combines missing metadata and access tags, reassigns the duplicate's visit history, and removes the duplicate place records. New places and coordinate changes that overlap another saved place are blocked with a proximity warning until explicitly confirmed.
+
+Each place can be labeled for **walking, car, motorcycle, public transport, and bicycle** access. Admins can filter the place list by these modes. Telegram admins use `/places` → place → **ویرایش جزئیات** → field button → send the value; the Worker stores a 15-minute per-admin edit session in the private data file.

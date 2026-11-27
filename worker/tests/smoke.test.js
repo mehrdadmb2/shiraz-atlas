@@ -65,6 +65,9 @@ test('Shiraz Atlas API privacy, admin auth, mutations and Telegram webhook', asy
     assert.equal(health.ok, true);
     assert.equal(health.dataConfigured, true);
 
+    response = await call('/api/admin/duplicates?threshold=35');
+    assert.equal(response.status, 401, 'duplicate scan is admin-only');
+
     response = await call('/api/state');
     const publicState = await response.json();
     assert.equal(publicState.places.length, 1, 'private places must not be public');
@@ -108,9 +111,11 @@ test('Shiraz Atlas API privacy, admin auth, mutations and Telegram webhook', asy
       headers: { 'content-type': 'application/json', Authorization: `Bearer ${session.token}`, Origin: 'https://mehrdadmb2.github.io' },
       body: JSON.stringify({ action, payload })
     });
-    response = await mutate('place.create', { name: 'No entry fee set', lat: 29.62, lng: 52.52, entryFee: null, estimatedCost: null, rating: null });
+    response = await mutate('place.create', { name: 'No entry fee set', lat: 29.62, lng: 52.52, entryFee: null, estimatedCost: null, rating: null, accessModes: ['walking','car','public_transport'], accessNotes: 'پارکینگ عمومی نزدیک ورودی' });
     assert.equal(response.status, 200);
     assert.equal(data.places[0].entryFee, null, 'blank fees should remain null, not become zero');
+    assert.deepEqual(data.places[0].accessModes, ['walking','car','public_transport']);
+    assert.equal(data.places[0].accessNotes, 'پارکینگ عمومی نزدیک ورودی');
 
     response = await mutate('visit.update', { id: 'visit1', quality: 'bad', note: 'updated private note' });
     assert.equal(response.status, 200);
@@ -119,6 +124,46 @@ test('Shiraz Atlas API privacy, admin auth, mutations and Telegram webhook', asy
     response = await mutate('route.update', { id: 'route1', quality: 'good', visitedAt: '2026-11-27T10:00:00.000Z' });
     assert.equal(response.status, 200);
     assert.equal(data.routes.find(route => route.id === 'route1').quality, 'good');
+
+    // An ordinary edit that resubmits unchanged coordinates must not be mistaken for a move.
+    response = await mutate('place.update', { id: 'private1', name: 'Private place updated', lat: 29.61, lng: 52.51 });
+    assert.equal(response.status, 200, 'editing a field without changing coordinates remains allowed');
+
+    // Near-duplicate creates are blocked until the admin explicitly confirms.
+    response = await mutate('place.create', { name: 'Public Park duplicate', lat: 29.6001, lng: 52.5001 });
+    assert.equal(response.status, 409);
+    const duplicateWarning = await response.json();
+    assert.equal(duplicateWarning.code, 'NEARBY_DUPLICATE');
+    assert.equal(duplicateWarning.matches[0].id, 'public1');
+    response = await mutate('place.update', { id: 'private1', lat: 29.6001, lng: 52.5001 });
+    assert.equal(response.status, 409, 'moving an existing place into a duplicate radius is warned');
+
+    response = await call('/api/admin/duplicates?threshold=4', { headers: { Authorization: `Bearer ${session.token}` } });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).threshold, 25, 'duplicate scan threshold is clamped to a safe 25m minimum');
+    response = await call('/api/admin/duplicates?threshold=99', { headers: { Authorization: `Bearer ${session.token}` } });
+    assert.equal((await response.json()).threshold, 50, 'duplicate scan threshold is clamped to a safe 50m maximum');
+
+    response = await mutate('place.create', { name: 'Public Park duplicate', lat: 29.6001, lng: 52.5001, accessModes: ['walking'], visibility: 'private', confirmNearDuplicate: true });
+    assert.equal(response.status, 200, 'admin can explicitly confirm a nearby independent place');
+    const duplicateId = (await response.json()).result.id;
+    response = await call('/api/admin/duplicates?threshold=35', { headers: { Authorization: `Bearer ${session.token}` } });
+    assert.equal(response.status, 200);
+    const duplicateReport = await response.json();
+    assert.ok(duplicateReport.groups.some(group => group.keep.id === 'public1' && group.duplicates.some(item => item.id === duplicateId)));
+
+    response = await mutate('visit.create', { placeId: duplicateId, quality: 'good', note: 'visit must be retained when merging' });
+    assert.equal(response.status, 200);
+    response = await mutate('place.merge', { keepId: 'public1', duplicateIds: ['private1'], threshold: 35 });
+    assert.equal(response.status, 400, 'server refuses merges beyond selected distance threshold');
+    assert.ok(data.places.some(place => place.id === 'private1'), 'failed merge leaves records untouched');
+
+    response = await mutate('place.merge', { keepId: 'public1', duplicateIds: [duplicateId], threshold: 35 });
+    assert.equal(response.status, 200);
+    assert.equal(data.places.some(place => place.id === duplicateId), false, 'merged duplicate record is removed');
+    assert.ok(data.visits.some(visit => visit.placeId === 'public1' && visit.note === 'visit must be retained when merging'), 'visits are reassigned to the canonical place');
+    assert.ok(data.places.find(place => place.id === 'public1').tags);
+    assert.equal(data.places.find(place => place.id === 'public1').visibility, 'private', 'merge preserves the stricter private visibility when records differ');
 
     // Successful sign-ins must not consume the failed-password rate-limit budget.
     for (let i = 0; i < 10; i++) {
@@ -141,7 +186,8 @@ test('Shiraz Atlas API privacy, admin auth, mutations and Telegram webhook', asy
       body: JSON.stringify(dmsPayload)
     });
     assert.equal(response.status, 200);
-    assert.equal(data.places.length, 5, 'DMS coordinate message should create a place');
+    assert.equal(data.places.length, 4, 'DMS duplicate coordinate should be blocked instead of creating a repeated place');
+    assert.ok(telegramCalls.some(call => call.method === 'sendMessage' && String(call.payload.text || '').includes('مکان مشابه')));
 
     const ownerAdd = { update_id: 1001, message: { message_id: 3, from: { id: 12345 }, chat: { id: 12345 }, text: '/adminadd 54321' } };
     response = await call('/telegram/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' }, body: JSON.stringify(ownerAdd) });
@@ -151,9 +197,23 @@ test('Shiraz Atlas API privacy, admin auth, mutations and Telegram webhook', asy
     const delegatedAdmin = { update_id: 1002, message: { message_id: 4, from: { id: 54321 }, chat: { id: 54321 }, text: '29.733000, 52.510000' } };
     response = await call('/telegram/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' }, body: JSON.stringify(delegatedAdmin) });
     assert.equal(response.status, 200);
-    assert.equal(data.places.length, 6, 'delegated admin can create places');
+    assert.equal(data.places.length, 5, 'delegated admin can create places');
 
-    const ownerRemove = { update_id: 1003, message: { message_id: 5, from: { id: 12345 }, chat: { id: 12345 }, text: '/adminremove 54321' } };
+    // Telegram inline field editor: tap a field, then send only the new value (no command / place ID).
+    const editMenuCallback = { update_id: 1003, callback_query: { id: 'cb-menu', from: { id: 12345 }, message: { chat: { id: 12345 } }, data: 'peditmenu:public1' } };
+    response = await call('/telegram/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' }, body: JSON.stringify(editMenuCallback) });
+    assert.equal(response.status, 200);
+    const editFieldCallback = { update_id: 1004, callback_query: { id: 'cb-field', from: { id: 12345 }, message: { chat: { id: 12345 } }, data: 'pef:public1:name' } };
+    response = await call('/telegram/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' }, body: JSON.stringify(editFieldCallback) });
+    assert.equal(response.status, 200);
+    assert.ok(data.meta.telegramEditSessions['12345:12345']);
+    const editReply = { update_id: 1005, message: { message_id: 6, from: { id: 12345 }, chat: { id: 12345 }, text: 'پارک مرکزی' } };
+    response = await call('/telegram/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' }, body: JSON.stringify(editReply) });
+    assert.equal(response.status, 200);
+    assert.equal(data.places.find(place => place.id === 'public1').name, 'پارک مرکزی');
+    assert.equal(Boolean(data.meta.telegramEditSessions['12345:12345']), false, 'edit session is cleared after a successful update');
+
+    const ownerRemove = { update_id: 1006, message: { message_id: 5, from: { id: 12345 }, chat: { id: 12345 }, text: '/adminremove 54321' } };
     response = await call('/telegram/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' }, body: JSON.stringify(ownerRemove) });
     assert.equal(response.status, 200);
     assert.ok(!data.meta.telegramAdmins.includes('54321'), 'owner can revoke delegated admin access');

@@ -29,6 +29,10 @@ The only authoritative data file is `atlas.json` in the private `shiraz-atlas-da
 | `address` | string | Address / district |
 | `description` | string | Public description |
 | `tags` | string[] | Independent user-defined tags |
+| `accessModes` | string[] | Optional travel access: `walking`, `car`, `motorcycle`, `public_transport`, `bicycle` |
+| `accessNotes` | string | Parking, access restrictions, walking approach notes |
+| `alternateNames` | string[] | Previous names preserved when duplicate place records are merged |
+| `mergedPlaceIds` | string[] | IDs of place records consolidated into this canonical place |
 | `entryFee` | number or null | Entry fee in IRR / toman as entered by user; UI labels toman |
 | `estimatedCost` | number or null | Estimated per-person cost |
 | `rating` | number or null | Personal score, 0–5 |
@@ -94,7 +98,7 @@ All writes go through `POST /api/admin/mutate` with a valid admin Bearer token:
 
 Supported actions:
 
-- `place.create`, `place.update`, `place.delete`
+- `place.create`, `place.update`, `place.delete`, `place.merge`
 - `visit.create`, `visit.update`, `visit.delete`
 - `route.create`, `route.update`, `route.delete`
 - `category.create`, `category.update`, `category.delete`
@@ -110,3 +114,12 @@ The Worker reloads the current GitHub blob SHA before writing and retries SHA co
 ## Telegram admin delegation (schema 1.1)
 
 `meta.telegramAdmins` is an array of numeric Telegram user IDs delegated by the owner through `/adminadd`. The first ID in the Worker secret `TELEGRAM_ADMIN_IDS` is the owner by default (or use the explicit `TELEGRAM_OWNER_ID` secret). Bootstrap IDs remain in the secret and cannot be removed through bot commands. Delegated IDs are private data and are never included in the public API response.
+
+
+## Duplicate detection and merge (schema 1.3)
+
+The admin-only `GET /api/admin/duplicates?threshold=35` endpoint scans coordinates for nearby places. The threshold is clamped to 25–50 metres (35m default). A new or moved place is warned/rejected with HTTP 409 and `code: NEARBY_DUPLICATE` unless the admin explicitly repeats the mutation with `confirmNearDuplicate: true`.
+
+`place.merge` keeps one canonical place, transfers missing metadata, unions tags and `accessModes`, redirects visit records to the canonical `placeId`, and removes duplicate place records. The merge endpoint independently verifies that every selected record is within the supplied threshold of the keeper.
+
+Telegram place editing uses `meta.telegramEditSessions` with a 15-minute expiry. Admins tap an edit-field button and send the new value as a normal message; no `/edit` command or place ID is needed.
