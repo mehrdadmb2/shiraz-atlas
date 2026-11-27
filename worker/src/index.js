@@ -1,4 +1,4 @@
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 const MAX_DATA_BYTES = 850 * 1024; // keep margin below GitHub Contents API's 1 MiB response boundary
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -221,7 +221,7 @@ function defaultData() {
       privacy: { visitsPrivateByDefault: true, routesPrivateByDefault: true }, duplicateThreshold: 35
     },
     categories: clone(DEFAULT_CATEGORIES), tags: [...DEFAULT_TAGS], places: [], visits: [], routes: [],
-    meta: { lastTelegramUpdateId: 0, processedTelegramUpdateIds: [], telegramAdmins: [], telegramEditSessions: {}, createdAt: new Date().toISOString() }
+    meta: { lastTelegramUpdateId: 0, processedTelegramUpdateIds: [], telegramAdmins: [], telegramEditSessions: {}, telegramAdminSessions: {}, createdAt: new Date().toISOString() }
   };
 }
 function normalizeData(data) {
@@ -237,10 +237,11 @@ function normalizeData(data) {
   out.places = Array.isArray(data.places) ? data.places : [];
   out.visits = Array.isArray(data.visits) ? data.visits : [];
   out.routes = Array.isArray(data.routes) ? data.routes : [];
-  out.meta = { lastTelegramUpdateId: 0, processedTelegramUpdateIds: [], telegramAdmins: [], telegramEditSessions: {}, ...(data.meta || {}) };
+  out.meta = { lastTelegramUpdateId: 0, processedTelegramUpdateIds: [], telegramAdmins: [], telegramEditSessions: {}, telegramAdminSessions: {}, ...(data.meta || {}) };
   if (!Array.isArray(out.meta.telegramAdmins)) out.meta.telegramAdmins = [];
   if (!Array.isArray(out.meta.processedTelegramUpdateIds)) out.meta.processedTelegramUpdateIds = [];
   if (!out.meta.telegramEditSessions || typeof out.meta.telegramEditSessions !== 'object' || Array.isArray(out.meta.telegramEditSessions)) out.meta.telegramEditSessions = {};
+  if (!out.meta.telegramAdminSessions || typeof out.meta.telegramAdminSessions !== 'object' || Array.isArray(out.meta.telegramAdminSessions)) out.meta.telegramAdminSessions = {};
   return out;
 }
 function githubConfig(env) {
@@ -251,7 +252,8 @@ function githubConfig(env) {
 }
 async function githubRequest(env, path, options = {}) {
   const cfg = githubConfig(env);
-  const url = `https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/${path}`;
+  const suffix = String(path || '').replace(/^\/+/, '');
+  const url = `https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}${suffix ? `/${suffix}` : ''}`;
   const response = await fetch(url, {
     ...options,
     headers: {
@@ -297,7 +299,11 @@ async function writeData(env, data, sha, message, cfg) {
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(body.message || `ذخیره در GitHub ناموفق بود (${response.status}).`);
+    let message = body.message || `ذخیره در GitHub ناموفق بود (${response.status}).`;
+    if (response.status === 401) message = 'توکن GitHub نامعتبر یا منقضی شده است؛ Secret با نام GITHUB_TOKEN را بررسی کن.';
+    else if (response.status === 403) message = 'GitHub درخواست نوشتن را رد کرد؛ برای Fine-grained token دسترسی Contents = Read and write و دسترسی به ریپوی خصوصی shiraz-atlas-data را فعال کن. اگر سازمان SSO دارد، توکن را مجاز کن.';
+    else if (response.status === 404) message = 'GitHub ریپوی داده یا مسیر فایل را برای این توکن پیدا نکرد؛ GITHUB_OWNER، GITHUB_DATA_REPO، GITHUB_BRANCH و GITHUB_DATA_PATH و دسترسی انتخاب‌شدهٔ توکن را بررسی کن.';
+    const error = new Error(message);
     error.status = response.status;
     throw error;
   }
@@ -419,7 +425,7 @@ function mutateAtlas(data, action, payload = {}) {
   if (action === 'place.update') {
     const place = data.places.find(p => p.id === payload.id); if (!place) throw new Error('مکان موردنظر پیدا نشد.');
     const previousCoordinates = { lat: Number(place.lat), lng: Number(place.lng) };
-    const fields = ['name','categoryId','address','description','bestTime','phone','website','imageUrl','notes','status','visibility','accessNotes','source'];
+    const fields = ['name','categoryId','address','description','bestTime','phone','website','imageUrl','notes','status','visibility','accessNotes','source','nameSource','nameConfidence'];
     for (const key of fields) if (Object.prototype.hasOwnProperty.call(payload, key)) place[key] = safeText(payload[key], key === 'description' || key === 'notes' ? 1200 : key === 'website' || key === 'imageUrl' ? 1000 : 250);
     if (Object.prototype.hasOwnProperty.call(payload, 'lat')) { const v = number(payload.lat, -90, 90); if (v === null) throw new Error('عرض جغرافیایی معتبر نیست.'); place.lat = v; }
     if (Object.prototype.hasOwnProperty.call(payload, 'lng')) { const v = number(payload.lng, -180, 180); if (v === null) throw new Error('طول جغرافیایی معتبر نیست.'); place.lng = v; }
@@ -470,6 +476,16 @@ function mutateAtlas(data, action, payload = {}) {
   if (action === 'telegram.edit-session.clear') {
     const key = `${safeText(payload.chatId, 40)}:${safeText(payload.userId, 40)}`;
     delete data.meta.telegramEditSessions[key]; return { ok: true };
+  }
+  if (action === 'telegram.admin-session.set') {
+    const key = `${safeText(payload.chatId, 40)}:${safeText(payload.userId, 40)}`;
+    if (!['add','remove'].includes(payload.action)) throw new Error('نوع عملیات مدیریت ادمین معتبر نیست.');
+    data.meta.telegramAdminSessions[key] = { chatId: String(payload.chatId), userId: String(payload.userId), action: payload.action, createdAt: now };
+    return { ok: true };
+  }
+  if (action === 'telegram.admin-session.clear') {
+    const key = `${safeText(payload.chatId, 40)}:${safeText(payload.userId, 40)}`;
+    delete data.meta.telegramAdminSessions[key]; return { ok: true };
   }
   if (action === 'visit.create') {
     const place = data.places.find(p => p.id === payload.placeId); if (!place) throw new Error('مکان بازدید در داده‌ها موجود نیست.');
@@ -569,42 +585,103 @@ function mutateAtlas(data, action, payload = {}) {
 async function reversePlaceName(env, lat, lng) {
   const latitude = number(lat, -90, 90), longitude = number(lng, -180, 180);
   if (latitude === null || longitude === null) return null;
-  const key = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude.toFixed(5)}&lon=${longitude.toFixed(5)}&zoom=18&addressdetails=1&extratags=1&namedetails=1`;
-  try {
-    const cache = caches.default;
-    const cacheRequest = new Request(key, { headers: { 'Accept': 'application/json' } });
-    let response = await cache.match(cacheRequest);
-    if (!response) {
-      if (Date.now() - lastNominatimRequestAt < 1100) return null;
-      lastNominatimRequestAt = Date.now();
-      response = await fetch(key, {
-        headers: { 'Accept': 'application/json', 'User-Agent': 'ShirazAtlas/1.4 (+https://github.com/mehrdadmb2/shiraz-atlas)' },
-        signal: AbortSignal.timeout(4500)
-      });
-      if (!response.ok) return null;
-      const copy = new Response(await response.clone().text(), {
-        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=43200' }
-      });
-      try { await cache.put(cacheRequest, copy); } catch {}
-    }
-    const result = await response.json();
-    const name = safeText(result?.namedetails?.['name:fa'] || result?.namedetails?.name || result?.name, 120);
-    if (!name) return null;
-    const category = String(result.category || '').toLowerCase();
-    const type = String(result.type || '').toLowerCase();
-    const addressType = String(result.addresstype || '').toLowerCase();
-    const eligible = ['tourism','historic','leisure','amenity','shop','natural'].includes(category) ||
-      /attraction|museum|monument|garden|park|castle|square|restaurant|cafe|market|place_of_worship|water/.test(`${type} ${addressType}`);
-    if (!eligible) return null;
-    const featureLat = Number(result.lat), featureLng = Number(result.lon);
-    if (!Number.isFinite(featureLat) || !Number.isFinite(featureLng)) return null;
-    const distanceMeters = haversine({ lat: latitude, lng: longitude }, { lat: featureLat, lng: featureLng });
-    // Never name a pin after a distant neighbour. Reverse-geocoding is a suggestion, not proof.
+  const cache = caches.default;
+  const normalizeCandidate = (name, featureLat, featureLng, address, source, priority = 0) => {
+    const cleanName = safeText(name, 120);
+    const fLat = Number(featureLat), fLng = Number(featureLng);
+    if (!cleanName || !Number.isFinite(fLat) || !Number.isFinite(fLng)) return null;
+    const distanceMeters = haversine({ lat: latitude, lng: longitude }, { lat: fLat, lng: fLng });
     if (distanceMeters > 65) return null;
-    const address = safeText(result.display_name, 250);
-    return { name, address, distanceMeters: Math.round(distanceMeters), source: 'openstreetmap-reverse', confidence: distanceMeters <= 25 ? 'high' : 'medium' };
+    return {
+      name: cleanName,
+      address: safeText(address || '', 250),
+      distanceMeters: Math.round(distanceMeters),
+      source,
+      confidence: distanceMeters <= 25 ? 'high' : 'medium',
+      _score: distanceMeters - priority * 8
+    };
+  };
+
+  // First choice: Nominatim reverse lookup, respecting its public 1 request/second policy.
+  const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude.toFixed(5)}&lon=${longitude.toFixed(5)}&zoom=18&addressdetails=1&extratags=1&namedetails=1`;
+  try {
+    const cacheRequest = new Request(nominatimUrl, { headers: { Accept: 'application/json' } });
+    let response = await cache.match(cacheRequest);
+    if (!response && Date.now() - lastNominatimRequestAt >= 1100) {
+      lastNominatimRequestAt = Date.now();
+      response = await fetch(nominatimUrl, {
+        headers: { Accept: 'application/json', 'User-Agent': 'ShirazAtlas/1.5 (+https://github.com/mehrdadmb2/shiraz-atlas)' },
+        signal: AbortSignal.timeout(5000)
+      });
+      if (response.ok) {
+        try {
+          await cache.put(cacheRequest, new Response(await response.clone().text(), {
+            headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=43200' }
+          }));
+        } catch {}
+      } else response = null;
+    }
+    if (response?.ok) {
+      const result = await response.json();
+      const category = String(result?.category || '').toLowerCase();
+      const type = String(result?.type || '').toLowerCase();
+      const addressType = String(result?.addresstype || '').toLowerCase();
+      const eligible = ['tourism','historic','leisure','amenity','shop','natural'].includes(category) ||
+        /attraction|museum|monument|garden|park|castle|square|restaurant|cafe|market|place_of_worship|water/.test(`${type} ${addressType}`);
+      if (eligible) {
+        const candidate = normalizeCandidate(
+          result?.namedetails?.['name:fa'] || result?.namedetails?.name || result?.name,
+          result?.lat, result?.lon, result?.display_name, 'openstreetmap-reverse', 3
+        );
+        if (candidate && candidate.distanceMeters <= 65) { delete candidate._score; return candidate; }
+      }
+    }
   } catch (error) {
-    console.warn(JSON.stringify({ level: 'warn', event: 'reverse_geocode_failed', message: error?.message || String(error) }));
+    console.warn(JSON.stringify({ level: 'warn', event: 'nominatim_reverse_failed', message: error?.message || String(error) }));
+  }
+
+  // Fallback: search named POIs around the coordinate. This is only used when
+  // reverse lookup has no suitable feature; results are cached and tightly bounded.
+  const cacheKey = `https://shiraz-atlas-cache.invalid/reverse-poi?lat=${latitude.toFixed(4)}&lng=${longitude.toFixed(4)}`;
+  try {
+    const cacheRequest = new Request(cacheKey);
+    let body = await cache.match(cacheRequest);
+    if (body) body = await body.json();
+    else {
+      const query = `[out:json][timeout:10];(nwr(around:100,${latitude},${longitude})["name"]["tourism"];nwr(around:100,${latitude},${longitude})["name"]["historic"];nwr(around:100,${latitude},${longitude})["name"]["leisure"];nwr(around:100,${latitude},${longitude})["name"]["amenity"];nwr(around:100,${latitude},${longitude})["name"]["shop"];nwr(around:100,${latitude},${longitude})["name"]["natural"];);out center tags;`;
+      let response = null;
+      for (const endpoint of ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']) {
+        try {
+          response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'content-type': 'application/x-www-form-urlencoded; charset=UTF-8', 'user-agent': 'ShirazAtlas/1.5 (+https://github.com/mehrdadmb2/shiraz-atlas)' },
+            body: `data=${encodeURIComponent(query)}`,
+            signal: AbortSignal.timeout(11000)
+          });
+          if (response.ok) break;
+        } catch { response = null; }
+      }
+      if (!response?.ok) return null;
+      body = await response.json();
+      try {
+        await cache.put(cacheRequest, new Response(JSON.stringify(body), {
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=43200' }
+        }));
+      } catch {}
+    }
+    const candidates = (body?.elements || []).map(element => {
+      const tags = element.tags || {}, center = element.center || element;
+      const name = tags['name:fa'] || tags.name || tags.brand || tags.operator;
+      const priority = tags.tourism ? 6 : tags.historic ? 5 : tags.leisure ? 4 : tags.amenity ? 3 : tags.shop ? 2 : tags.natural ? 1 : 0;
+      const address = [tags['addr:street'], tags['addr:suburb'], tags['addr:city']].filter(Boolean).join('، ');
+      return normalizeCandidate(name, center.lat, center.lon, address, 'openstreetmap-overpass', priority);
+    }).filter(Boolean).sort((a, b) => a._score - b._score);
+    const best = candidates[0];
+    if (!best) return null;
+    delete best._score;
+    return best;
+  } catch (error) {
+    console.warn(JSON.stringify({ level: 'warn', event: 'overpass_reverse_failed', message: error?.message || String(error) }));
     return null;
   }
 }
@@ -743,8 +820,49 @@ async function weatherFor(url) {
   }
 }
 
+function compactTelegramId(value) {
+  const id = String(value || '');
+  const uuid = id.match(/^pl_([0-9a-f]{8})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{12})$/i);
+  if (uuid) {
+    const hex = uuid.slice(1).join('').toLowerCase();
+    const bytes = new Uint8Array(hex.match(/../g).map(pair => parseInt(pair, 16)));
+    return `u${bytesToBase64Url(bytes)}`;
+  }
+  return `s${bytesToBase64Url(encoder.encode(id))}`;
+}
+function expandTelegramId(token) {
+  const value = String(token || '');
+  try {
+    if (value.startsWith('u')) {
+      const binary = atob(value.slice(1).replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - value.slice(1).length % 4) % 4));
+      const hex = [...binary].map(char => char.charCodeAt(0).toString(16).padStart(2, '0')).join('');
+      if (hex.length !== 32) return '';
+      return `pl_${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+    }
+    if (value.startsWith('s')) {
+      const encoded = value.slice(1);
+      const binary = atob(encoded.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - encoded.length % 4) % 4));
+      return decoder.decode(Uint8Array.from(binary, char => char.charCodeAt(0)));
+    }
+  } catch {}
+  return value;
+}
+function placeCallback(prefix, placeId, field = '') {
+  const token = compactTelegramId(placeId);
+  return field ? `${prefix}${token}:${field}` : `${prefix}${token}`;
+}
+function validateTelegramCallbackData(payload) {
+  const keyboard = payload?.reply_markup?.inline_keyboard;
+  if (!Array.isArray(keyboard)) return;
+  for (const row of keyboard) for (const button of row || []) {
+    if (button?.callback_data != null && encoder.encode(String(button.callback_data)).byteLength > 64) {
+      throw new Error(`دادهٔ دکمه از محدودیت ۶۴ بایت تلگرام بیشتر است: ${String(button.text || 'دکمه').slice(0, 30)}`);
+    }
+  }
+}
 async function telegramCall(env, method, payload) {
   if (!env.TELEGRAM_BOT_TOKEN) throw new Error('TELEGRAM_BOT_TOKEN تنظیم نشده است.');
+  validateTelegramCallbackData(payload);
   const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
   const body = await response.json().catch(() => ({}));
   if (!response.ok || !body.ok) throw new Error(body.description || `Telegram ${method} failed`);
@@ -802,7 +920,7 @@ function formatPlace(place, data, includePrivate = false) {
 }
 async function sendPlace(env, chatId, place, data, admin = false) {
   const rows = [[{ text: '🧭 مسیریابی', url: `https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lng}` }, { text: '🗺️ نقشه اطلس', url: `${env.PUBLIC_SITE_URL || 'https://mehrdadmb2.github.io/shiraz-atlas/'}?place=${encodeURIComponent(place.id)}` }]];
-  if (admin) rows.push([{ text: '🛠 ویرایش جزئیات این مکان', callback_data: `peditmenu:${place.id}` }]);
+  if (admin) rows.push([{ text: '🛠 ویرایش جزئیات این مکان', callback_data: placeCallback('pm:', place.id) }]);
   await tgMessage(env, chatId, formatPlace(place, data, admin), { reply_markup: { inline_keyboard: rows } });
   await telegramCall(env, 'sendLocation', { chat_id: chatId, latitude: place.lat, longitude: place.lng });
 }
@@ -841,26 +959,60 @@ function categoryLookup(data, value) {
   if (!s) return data.categories[0]?.id || 'hidden';
   return data.categories.find(c => c.id.toLowerCase() === s || c.name.toLowerCase() === s)?.id || slug(s);
 }
-async function runDiagnostics(env){
- const checks=[],add=(name,ok,detail)=>checks.push({name,ok:!!ok,detail:safeText(detail,180)});
- add('GitHub credentials',!!(env.GITHUB_OWNER&&env.GITHUB_DATA_REPO&&env.GITHUB_TOKEN),'Owner / private repo / token');
- add('Session security',!!(env.SESSION_SECRET&&env.SESSION_SECRET.length>=32),'SESSION_SECRET >= 32 chars');
- add('Telegram token',!!env.TELEGRAM_BOT_TOKEN,'Bot token configured');
- add('Webhook secret',!!env.TELEGRAM_WEBHOOK_SECRET,'Webhook secret configured');
- try{const repoRes=await fetch(`https://api.github.com/repos/${encodeURIComponent(env.GITHUB_OWNER||'mehrdadmb2')}/shiraz-atlas`,{headers:{'Accept':'application/vnd.github+json','User-Agent':'Shiraz-Atlas-Diagnostics'}});add('Public source repository',repoRes.ok,`GitHub API HTTP ${repoRes.status}`);}catch(e){add('Public source repository',false,e.message);}
- try {
-  const metaRes=await githubRequest(env,'');
-  const meta=await metaRes.json().catch(()=>({}));
-  const canWrite=metaRes.ok&&(meta.permissions?.push===true||meta.permissions?.admin===true);
-  add('GitHub data write permission',canWrite,metaRes.ok?`push=${Boolean(meta.permissions?.push)} · admin=${Boolean(meta.permissions?.admin)}`:`GitHub API HTTP ${metaRes.status}`);
- } catch(e) { add('GitHub data write permission',false,e.message); }
- if(env.PUBLIC_SITE_URL)try{const pageRes=await fetch(env.PUBLIC_SITE_URL,{headers:{'user-agent':'ShirazAtlas-Diagnostics/1.1'}});add('GitHub Pages website',pageRes.ok,`HTTP ${pageRes.status} · ${env.PUBLIC_SITE_URL}`);}catch(e){add('GitHub Pages website',false,e.message);}
+async function runDiagnostics(env) {
+  const checks = [];
+  const add = (name, ok, detail) => checks.push({ name, ok: !!ok, detail: safeText(detail, 180) });
+  add('GitHub credentials', !!(env.GITHUB_OWNER && env.GITHUB_DATA_REPO && env.GITHUB_TOKEN), 'Owner / private repo / token configured');
+  add('Session security', !!(env.SESSION_SECRET && env.SESSION_SECRET.length >= 32), 'SESSION_SECRET >= 32 chars');
+  add('Telegram token', !!env.TELEGRAM_BOT_TOKEN, 'Bot token configured');
+  add('Webhook secret', !!env.TELEGRAM_WEBHOOK_SECRET, 'Webhook secret configured');
 
- try{const{data,cfg}=await readData(env);add('Private data repository',true,`${cfg.owner}/${cfg.repo}/${cfg.path}`);add('Data integrity',Array.isArray(data.places)&&Array.isArray(data.routes)&&Array.isArray(data.visits),`places=${data.places.length}, routes=${data.routes.length}, visits=${data.visits.length}`);}
- catch(e){add('Private data repository',false,e.message);}
- if(env.TELEGRAM_BOT_TOKEN)try{const me=await telegramCall(env,'getMe',{});add('Telegram Bot API',true,`@${me.username}`);const wh=await telegramCall(env,'getWebhookInfo',{});add('Telegram webhook',!!wh.url,wh.url?`pending=${wh.pending_update_count||0}`:'Webhook URL is empty');if(wh.last_error_message)add('Webhook last error',false,wh.last_error_message);}catch(e){add('Telegram Bot API',false,e.message);}
- console.log(JSON.stringify({level:'info',event:'diagnostics',at:new Date().toISOString(),checks}));return checks;
+  // Avoid the unauthenticated GitHub REST API rate limit for public repository checks.
+  try {
+    const owner = encodeURIComponent(env.GITHUB_OWNER || 'mehrdadmb2');
+    const branch = encodeURIComponent(env.GITHUB_BRANCH || 'main');
+    const sourceUrl = `https://raw.githubusercontent.com/${owner}/shiraz-atlas/${branch}/README.md`;
+    const sourceRes = await fetch(sourceUrl, { headers: { 'User-Agent': 'ShirazAtlas-Diagnostics/1.5' }, signal: AbortSignal.timeout(7000) });
+    add('Public source repository', sourceRes.ok, sourceRes.ok ? `raw README HTTP ${sourceRes.status}` : `raw GitHub HTTP ${sourceRes.status}`);
+  } catch (error) { add('Public source repository', false, error.message); }
+
+  try {
+    const metaRes = await githubRequest(env, '');
+    const meta = await metaRes.json().catch(() => ({}));
+    const canPush = metaRes.ok && (meta.permissions?.push === true || meta.permissions?.admin === true);
+    add('GitHub data repository access', metaRes.ok, metaRes.ok ? `${meta.full_name || `${env.GITHUB_OWNER}/${env.GITHUB_DATA_REPO}`} · private=${Boolean(meta.private)}` : `GitHub API HTTP ${metaRes.status}: ${meta.message || 'metadata unavailable'}`);
+    add('GitHub repository push role', canPush, metaRes.ok ? `push=${Boolean(meta.permissions?.push)} · admin=${Boolean(meta.permissions?.admin)} · token Contents write scope must be granted` : `GitHub API HTTP ${metaRes.status}`);
+  } catch (error) {
+    add('GitHub data repository access', false, error.message);
+    add('GitHub repository push role', false, 'Repository metadata could not be read.');
+  }
+
+  if (env.PUBLIC_SITE_URL) {
+    try {
+      const pageRes = await fetch(env.PUBLIC_SITE_URL, { headers: { 'user-agent': 'ShirazAtlas-Diagnostics/1.5' }, signal: AbortSignal.timeout(7000) });
+      add('GitHub Pages website', pageRes.ok, `HTTP ${pageRes.status} · ${env.PUBLIC_SITE_URL}`);
+    } catch (error) { add('GitHub Pages website', false, error.message); }
+  }
+
+  try {
+    const { data, cfg } = await readData(env);
+    add('Private data repository', true, `${cfg.owner}/${cfg.repo}/${cfg.path}`);
+    add('Data integrity', Array.isArray(data.places) && Array.isArray(data.routes) && Array.isArray(data.visits), `places=${data.places.length}, routes=${data.routes.length}, visits=${data.visits.length}`);
+  } catch (error) { add('Private data repository', false, error.message); }
+
+  if (env.TELEGRAM_BOT_TOKEN) {
+    try {
+      const me = await telegramCall(env, 'getMe', {});
+      add('Telegram Bot API', true, `@${me.username}`);
+      const webhook = await telegramCall(env, 'getWebhookInfo', {});
+      add('Telegram webhook', !!webhook.url, webhook.url ? `pending=${webhook.pending_update_count || 0}` : 'Webhook URL is empty');
+      if (webhook.last_error_message) add('Webhook last error', false, webhook.last_error_message);
+    } catch (error) { add('Telegram Bot API', false, error.message); }
+  }
+  console.log(JSON.stringify({ level: 'info', event: 'diagnostics', version: VERSION, at: new Date().toISOString(), checks }));
+  return checks;
 }
+
 async function sendHome(env, chatId, fromId) {
   const admin = await isAdmin(fromId, env);
   return tgMessage(env, chatId, `<b>🧭 Shiraz Atlas</b>
@@ -916,9 +1068,10 @@ const TELEGRAM_EDIT_FIELDS = {
   phone: '☎️ شماره تماس', website: '🌐 وب‌سایت', imageUrl: '🖼️ لینک تصویر', notes: '🔒 یادداشت خصوصی', status: '📌 وضعیت', visibility: '👁 نمایش عمومی / خصوصی'
 };
 function placeEditKeyboard(placeId) {
-  const keys = Object.entries(TELEGRAM_EDIT_FIELDS).map(([field, label]) => ({ text: label, callback_data: `pef:${placeId}:${field}` }));
+  const keys = Object.entries(TELEGRAM_EDIT_FIELDS).map(([field, label]) => ({ text: label, callback_data: placeCallback('pe:', placeId, field) }));
   const rows = []; for (let i = 0; i < keys.length; i += 2) rows.push(keys.slice(i, i + 2));
-  rows.push([{ text: '🔄 نمایش دوباره مکان', callback_data: `pview:${placeId}` }]);
+  rows.push([{ text: '🏷 تشخیص نام از مختصات', callback_data: placeCallback('pn:', placeId) }]);
+  rows.push([{ text: '🔄 نمایش دوباره مکان', callback_data: placeCallback('pv:', placeId) }]);
   return { inline_keyboard: rows };
 }
 function parseTelegramAccessModes(raw) {
@@ -942,6 +1095,7 @@ ${tgEscape(place.name)}
 }
 async function storeTelegramEditSession(env, chatId, userId, placeId, field, updateId) {
   if (!Object.prototype.hasOwnProperty.call(TELEGRAM_EDIT_FIELDS, field)) throw new Error('فیلد ویرایش معتبر نیست.');
+  await adminMutation(env, 'telegram.admin-session.clear', { chatId, userId }, 0);
   await adminMutation(env, 'telegram.edit-session.set', { chatId, userId, placeId, field }, updateId);
 }
 async function applyTelegramEditReply(message, update, env, session) {
@@ -975,16 +1129,18 @@ async function applyTelegramEditReply(message, update, env, session) {
   catch (error) { if (error?.details?.code === 'NEARBY_DUPLICATE') return tgMessage(env, chatId, `⚠️ مختصات جدید به مکان‌های ثبت‌شده نزدیک است:\n${(error.details.matches || []).map(x => `• ${tgEscape(x.name)} · ${x.distanceMeters} متر`).join('\n')}\n\nنشست ویرایش باز می‌ماند؛ مختصات دیگری بفرست یا /cancel کن.`); throw error; }
   await adminMutation(env, 'telegram.edit-session.clear', { chatId, userId }, 0);
   const latest = await getBotData(env), updated = latest.places.find(p => p.id === place.id);
-  await tgMessage(env, chatId, `✅ <b>${tgEscape(TELEGRAM_EDIT_FIELDS[session.field])}</b> برای «${tgEscape(updated?.name || place.name)}» ذخیره شد.`, { reply_markup: { inline_keyboard: [[{ text: '🛠 ویرایش فیلد دیگر', callback_data: `peditmenu:${place.id}` }, { text: '👁 مشاهده مکان', callback_data: `pview:${place.id}` }]] } });
+  await tgMessage(env, chatId, `✅ <b>${tgEscape(TELEGRAM_EDIT_FIELDS[session.field])}</b> برای «${tgEscape(updated?.name || place.name)}» ذخیره شد.`, { reply_markup: { inline_keyboard: [[{ text: '🛠 ویرایش فیلد دیگر', callback_data: placeCallback('pm:', place.id) }, { text: '👁 مشاهده مکان', callback_data: placeCallback('pv:', place.id) }]] } });
 }
 async function telegramCreatePlace(env, chatId, payload, updateId) {
   try {
     const saved = await adminMutation(env, 'place.create', payload, updateId);
-    return tgMessage(env, chatId, `✅ مکان <b>${tgEscape(payload.name)}</b> ذخیره شد.\nشناسه: <code>${tgEscape(saved.result.id)}</code>`, { reply_markup: { inline_keyboard: [[{ text: '🛠 ویرایش جزئیات', callback_data: `peditmenu:${saved.result.id}` }]] } });
+    if (saved.result?.duplicate) return tgMessage(env, chatId, 'ℹ️ این پیام قبلاً پردازش شده است؛ مکان دوباره ثبت نشد.');
+    const savedPlace = saved.result.place || (await getBotData(env)).places.find(place => place.id === saved.result.id);
+    return tgMessage(env, chatId, `✅ مکان <b>${tgEscape(savedPlace?.name || payload.name)}</b> ذخیره شد.${savedPlace?.nameSource === 'openstreetmap-reverse' ? `\n🏷 نام با نقشه تطبیق داده شد · اطمینان ${tgEscape(savedPlace.nameConfidence || 'نامشخص')}` : ''}\nشناسه: <code>${tgEscape(saved.result.id)}</code>`, { reply_markup: { inline_keyboard: [[{ text: '🛠 ویرایش جزئیات', callback_data: placeCallback('pm:', saved.result.id) }]] } });
   } catch (error) {
     if (error instanceof NearbyDuplicateError || error?.details?.code === 'NEARBY_DUPLICATE') {
       const matches = error.details.matches || [];
-      return tgMessage(env, chatId, `⚠️ <b>مکان مشابه پیدا شد</b>\n${matches.map(x => `• ${tgEscape(x.name)} — ${x.distanceMeters} متر`).join('\n')}\n\nبرای جلوگیری از ثبت تکراری، این مکان ذخیره نشد. مکان قبلی را از فهرست انتخاب کن یا پس از بررسی، از سایت استفاده کن.`, { reply_markup: { inline_keyboard: matches.slice(0,5).map(x => [{ text: `📍 ${String(x.name).slice(0,35)}`, callback_data: `pview:${x.id}` }]) } });
+      return tgMessage(env, chatId, `⚠️ <b>مکان مشابه پیدا شد</b>\n${matches.map(x => `• ${tgEscape(x.name)} — ${x.distanceMeters} متر`).join('\n')}\n\nبرای جلوگیری از ثبت تکراری، این مکان ذخیره نشد. مکان قبلی را از فهرست انتخاب کن یا پس از بررسی، از سایت استفاده کن.`, { reply_markup: { inline_keyboard: matches.slice(0,5).map(x => [{ text: `📍 ${String(x.name).slice(0,35)}`, callback_data: placeCallback('pv:', x.id) }]) } });
     }
     throw error;
   }
@@ -995,9 +1151,19 @@ async function handleTelegramMessage(message, update, env) {
   const admin = await isAdmin(fromId, env);
   const rawText = String(message.text || message.caption || '').trim();
   if (admin && rawText && !rawText.startsWith('/')) {
-    const data = await getBotData(env), key = `${chatId}:${fromId}`, session = data.meta?.telegramEditSessions?.[key];
+    const data = await getBotData(env), key = `${chatId}:${fromId}`;
+    const session = data.meta?.telegramEditSessions?.[key];
     if (session && Date.now() - Date.parse(session.createdAt || 0) <= 15 * 60 * 1000) return applyTelegramEditReply(message, update, env, session);
     if (session) await adminMutation(env, 'telegram.edit-session.clear', { chatId, userId: fromId }, 0);
+    const adminSession = data.meta?.telegramAdminSessions?.[key];
+    if (adminSession && isOwner(fromId, env) && Date.now() - Date.parse(adminSession.createdAt || 0) <= 5 * 60 * 1000) {
+      const targetId = normalizeDigits(rawText).trim();
+      if (!/^\d{5,20}$/.test(targetId)) return tgMessage(env, chatId, 'شناسه معتبر نیست؛ فقط عدد ۵ تا ۲۰ رقمی بفرست. نشست باز می‌ماند؛ برای لغو /cancel را ارسال کن.');
+      await adminMutation(env, adminSession.action === 'add' ? 'admin.add' : 'admin.remove', { userId: targetId }, update.update_id);
+      await adminMutation(env, 'telegram.admin-session.clear', { chatId, userId: fromId }, 0);
+      return tgMessage(env, chatId, adminSession.action === 'add' ? `✅ <code>${targetId}</code> با موفقیت به فهرست ادمین‌ها اضافه شد.` : `🗑 <code>${targetId}</code> از فهرست ادمین‌های افزوده‌شده حذف شد.`);
+    }
+    if (adminSession) await adminMutation(env, 'telegram.admin-session.clear', { chatId, userId: fromId }, 0);
   }
   if (message.location) {
     const point = { lat: Number(message.location.latitude), lng: Number(message.location.longitude) };
@@ -1023,7 +1189,7 @@ async function handleTelegramMessage(message, update, env) {
     if (cmd === 'start') return tgMessage(env, chatId, `سلام ${tgEscape(message.from.first_name || 'دوست من')}! 👋\nبه <b>Shiraz Atlas</b> خوش آمدی.\n\nمکان‌های موردعلاقه‌ات را ذخیره کن، مقصد تصادفی بگیر و مسیرهایت را ثبت کن.\n\n/help برای راهنما`);
     if (cmd === 'help') return tgMessage(env, chatId, formatHelp(admin,isOwner(fromId,env)),{reply_markup:botKeyboard(admin,isOwner(fromId,env))});
     if (cmd === 'myid' || cmd === 'whoami') return tgMessage(env, chatId, `شناسه عددی تلگرام شما:\n<code>${fromId}</code>\n${admin ? '✅ دسترسی ادمین فعال است.' : 'دسترسی مدیریتی فعال نیست.'}`);
-    if (cmd === 'cancel') { if (admin) await adminMutation(env, 'telegram.edit-session.clear', { chatId, userId: fromId }, update.update_id); return tgMessage(env, chatId, 'عملیات جاری لغو شد.'); }
+    if (cmd === 'cancel') { if (admin) { await adminMutation(env, 'telegram.edit-session.clear', { chatId, userId: fromId }, update.update_id); await adminMutation(env, 'telegram.admin-session.clear', { chatId, userId: fromId }, 0); } return tgMessage(env, chatId, 'عملیات جاری لغو شد.'); }
     if(['test','health','diagnostics'].includes(cmd)){
       if(!admin)return tgMessage(env,chatId,'⛔ فقط ادمین‌ها اجازه اجرای تست را دارند.');
       const checks=await runDiagnostics(env),ok=checks.filter(x=>x.ok).length;
@@ -1036,7 +1202,14 @@ async function handleTelegramMessage(message, update, env) {
     }
     if(cmd==='adminadd'||cmd==='adminremove'){
       if(!isOwner(fromId,env))return tgMessage(env,chatId,'⛔ فقط مالک اصلی اجازه مدیریت ادمین‌ها را دارد.');
-      const userId=argText.replace(/[^0-9]/g,'');if(!/^\d{5,20}$/.test(userId))return tgMessage(env,chatId,'شناسه معتبر نیست؛ کاربر ابتدا /myid را ارسال کند.');
+      if(!argText){
+        await adminMutation(env,'telegram.edit-session.clear',{chatId,userId:fromId},0);
+        await adminMutation(env,'telegram.admin-session.set',{chatId,userId:fromId,action:cmd==='adminadd'?'add':'remove'},update.update_id);
+        return tgMessage(env,chatId,cmd==='adminadd'?'👤 شناسه عددی کاربری را که می‌خواهی ادمین شود بفرست.\nمثال: <code>381200758</code>':'👤 شناسه عددی ادمینی را که می‌خواهی حذف کنی بفرست.\nبرای لغو /cancel را ارسال کن.',{reply_markup:{force_reply:true,selective:true,input_field_placeholder:'فقط شناسه عددی تلگرام…'}});
+      }
+      await adminMutation(env,'telegram.admin-session.clear',{chatId,userId:fromId},0);
+      const userId=normalizeDigits(argText).trim();
+      if(!/^\d{5,20}$/.test(userId))return tgMessage(env,chatId,'شناسه معتبر نیست. فقط عدد ۵ تا ۲۰ رقمی بفرست؛ برای دریافت شناسه از /myid استفاده کن.');
       await adminMutation(env,cmd==='adminadd'?'admin.add':'admin.remove',{userId},update.update_id);
       return tgMessage(env,chatId,cmd==='adminadd'?`✅ <code>${userId}</code> ادمین شد.`:`🗑 <code>${userId}</code> از ادمین‌های افزوده‌شده حذف شد.`);
     }
@@ -1051,7 +1224,7 @@ async function handleTelegramMessage(message, update, env) {
       const data = await getBotData(env); const q = argText.toLowerCase();
       const list = data.places.filter(p => (admin || p.visibility !== 'private') && (!q || `${p.name} ${p.description} ${p.address} ${(p.tags||[]).join(' ')}`.toLowerCase().includes(q))).slice(0, 10);
       if (!list.length) return tgMessage(env, chatId, q ? 'نتیجه‌ای پیدا نشد.' : 'هنوز مکان عمومی ثبت نشده است.');
-      await tgMessage(env, chatId, `<b>🧭 اطلس مکان‌ها</b>\n<blockquote>📍 ${list.length} مکان ${q ? 'یافت‌شده' : 'ثبت‌شده'}\nبرای مشاهدهٔ جزئیات یا ویرایش، یک مورد را انتخاب کن.</blockquote>\n<code>Shiraz Atlas · Places Index</code>`, { reply_markup: { inline_keyboard: list.map(p => admin ? [{ text: `📍 ${p.name.slice(0,32)}`, callback_data: `pview:${p.id}` }, { text: '✏️', callback_data: `peditmenu:${p.id}` }] : [{ text: `📍 ${p.name.slice(0,40)}`, callback_data: `pview:${p.id}` }]) } });
+      await tgMessage(env, chatId, `<b>🧭 اطلس مکان‌ها</b>\n<blockquote>📍 ${list.length} مکان ${q ? 'یافت‌شده' : 'ثبت‌شده'}\nبرای مشاهدهٔ جزئیات یا ویرایش، یک مورد را انتخاب کن.</blockquote>\n<code>Shiraz Atlas · Places Index</code>`, { reply_markup: { inline_keyboard: list.map(p => admin ? [{ text: `📍 ${p.name.slice(0,32)}`, callback_data: placeCallback('pv:', p.id) }, { text: '✏️', callback_data: placeCallback('pm:', p.id) }] : [{ text: `📍 ${p.name.slice(0,40)}`, callback_data: placeCallback('pv:', p.id) }]) } });
       if (list.length === 1) await sendPlace(env, chatId, list[0], data, admin);
       return;
     }
@@ -1123,7 +1296,7 @@ async function handleTelegramMessage(message, update, env) {
       const report = groups.slice(0, 12).map((group, index) => {
         const title = `${index + 1}. <b>${tgEscape(group.keep.name)}</b>`;
         const members = group.duplicates.map(item => {
-          if (actions < 20) { rows.push([{ text: `🧩 ادغام «${item.name.slice(0,24)}»`, callback_data: `dconfirm:${group.keep.id}:${item.id}` }]); actions++; }
+          if (actions < 20) { rows.push([{ text: `🧩 ادغام «${item.name.slice(0,24)}»`, callback_data: `dc:${compactTelegramId(group.keep.id)}:${compactTelegramId(item.id)}` }]); actions++; }
           return `  └ ${tgEscape(item.name)} · ${item.distanceMeters}m`;
         }).join('\n');
         return `${title}\n${members}`;
@@ -1161,37 +1334,58 @@ async function handleTelegramCallback(callback, update, env) {
   }
 
   const admin=await isAdmin(fromId,env);
-  if (data.startsWith('pview:')) {
+  if (data.startsWith('pv:') || data.startsWith('pview:')) {
     await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id });
-    const current = await getBotData(env), place = current.places.find(p => p.id === data.slice(6));
+    const token = data.startsWith('pv:') ? data.slice(3) : data.slice('pview:'.length);
+    const placeId = data.startsWith('pv:') ? expandTelegramId(token) : token;
+    const current = await getBotData(env), place = current.places.find(p => p.id === placeId);
     if (!place || (!admin && place.visibility === 'private')) return tgMessage(env, chatId, 'این مکان پیدا نشد یا دسترسی مشاهده آن را نداری.');
     return sendPlace(env, chatId, place, current, admin);
   }
-  if (data.startsWith('peditmenu:')) {
+  if (data.startsWith('pm:') || data.startsWith('peditmenu:')) {
     await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id });
     if (!admin) return tgMessage(env, chatId, '⛔ دسترسی ادمین لازم است.');
-    const current = await getBotData(env), place = current.places.find(p => p.id === data.slice(9));
-    if (!place) return tgMessage(env, chatId, 'مکان پیدا نشد.');
+    const token = data.startsWith('pm:') ? data.slice(3) : data.slice('peditmenu:'.length);
+    const placeId = data.startsWith('pm:') ? expandTelegramId(token) : token;
+    const current = await getBotData(env), place = current.places.find(p => p.id === placeId);
+    if (!place) return tgMessage(env, chatId, `مکان پیدا نشد. شناسهٔ دریافتی: <code>${tgEscape(placeId)}</code>؛ فهرست مکان‌ها را دوباره باز کن.`);
     return sendPlaceEditMenu(env, chatId, place);
   }
-  if (data.startsWith('pef:')) {
+  if (data.startsWith('pe:') || data.startsWith('pef:')) {
     await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id });
     if (!admin) return tgMessage(env, chatId, '⛔ دسترسی ادمین لازم است.');
-    const [, placeId, field] = data.split(':');
+    const parts = data.split(':');
+    const compact = data.startsWith('pe:');
+    const placeId = compact ? expandTelegramId(parts[1]) : parts[1];
+    const field = parts[2];
     const current = await getBotData(env), place = current.places.find(p => p.id === placeId);
     if (!place || !Object.prototype.hasOwnProperty.call(TELEGRAM_EDIT_FIELDS, field)) return tgMessage(env, chatId, 'مکان یا فیلد ویرایش پیدا نشد.');
     await storeTelegramEditSession(env, chatId, fromId, placeId, field, update.update_id);
     const hints = { categoryId: 'نام دسته‌بندی را بفرست.', coordinates: 'مختصات جدید را مثل 29.72, 52.53 بفرست.', tags: 'برچسب‌ها را با کاما جدا کن؛ برای پاک‌کردن بنویس «پاک شود».', accessModes: 'یک یا چند مورد را با کاما بفرست: پیاده‌روی، خودرو، موتورسیکلت، حمل‌ونقل عمومی، دوچرخه.', entryFee: 'مبلغ ورودی را به تومان و فقط به‌صورت عدد بفرست؛ برای پاک‌کردن «ندارد» بنویس.', estimatedCost: 'هزینهٔ تقریبی هر نفر را به تومان و فقط به‌صورت عدد بفرست.', rating: 'امتیاز ۰ تا ۵ را بفرست.', visibility: '«عمومی» یا «خصوصی» بفرست.', status: '«فعال»، «در برنامه بازدید» یا «تعطیل» بفرست.' };
     return tgMessage(env, chatId, `<b>${tgEscape(TELEGRAM_EDIT_FIELDS[field])}</b> · ${tgEscape(place.name)}\n${tgEscape(hints[field] || 'مقدار جدید را در پیام بعدی بفرست.')}\n\nبرای لغو، /cancel را بفرست.`, { reply_markup: { force_reply: true, selective: true, input_field_placeholder: 'مقدار جدید را وارد کن…' } });
   }
+  if (data.startsWith('pn:')) {
+    await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id, text: 'در حال بررسی نقشه…' });
+    if (!admin) return tgMessage(env, chatId, '⛔ دسترسی ادمین لازم است.');
+    const placeId = expandTelegramId(data.slice(3));
+    const current = await getBotData(env), place = current.places.find(item => item.id === placeId);
+    if (!place) return tgMessage(env, chatId, 'مکان پیدا نشد؛ فهرست را دوباره باز کن.');
+    const suggestion = await reversePlaceName(env, place.lat, place.lng);
+    if (!suggestion) return tgMessage(env, chatId, `برای «${tgEscape(place.name)}» نام معتبر و نزدیکی در OpenStreetMap پیدا نشد. مختصات را بررسی کن یا نام را دستی ویرایش کن.`);
+    await adminMutation(env, 'place.update', { id: place.id, name: suggestion.name, address: place.address || suggestion.address, nameSource: suggestion.source, nameConfidence: suggestion.confidence }, update.update_id);
+    return tgMessage(env, chatId, `<b>🏷 نام مکان به‌روزرسانی شد</b>\n${tgEscape(suggestion.name)}\n<code>${suggestion.distanceMeters} متر · اطمینان ${tgEscape(suggestion.confidence)}</code>`, { reply_markup: { inline_keyboard: [[{ text: '🛠 ادامه ویرایش', callback_data: placeCallback('pm:', place.id) }, { text: '👁 مشاهده', callback_data: placeCallback('pv:', place.id) }]] } });
+  }
   if (data === 'dcancel') {
     await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id, text: 'ادغام لغو شد.' });
     return;
   }
-  if (data.startsWith('dconfirm:')) {
+  if (data.startsWith('dc:') || data.startsWith('dconfirm:')) {
     await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id });
     if (!admin) return tgMessage(env, chatId, '⛔ دسترسی ادمین لازم است.');
-    const [, keepId, duplicateId] = data.split(':');
+    const [, keepToken, duplicateToken] = data.split(':');
+    const compact = data.startsWith('dc:');
+    const keepId = compact ? expandTelegramId(keepToken) : keepToken;
+    const duplicateId = compact ? expandTelegramId(duplicateToken) : duplicateToken;
     const current = await getBotData(env);
     const keep = current.places.find(place => place.id === keepId);
     const duplicate = current.places.find(place => place.id === duplicateId);
@@ -1199,16 +1393,20 @@ async function handleTelegramCallback(callback, update, env) {
     const threshold = duplicateThreshold(current.settings?.duplicateThreshold, 35);
     const distance = Math.round(haversine(keep, duplicate));
     if (distance > threshold) return tgMessage(env, chatId, `⚠️ فاصلهٔ فعلی ${distance} متر است و از آستانهٔ ${threshold} متر بیشتر است. اسکن را دوباره انجام بده.`);
-    return tgMessage(env, chatId, `<b>⚠️ تأیید نهایی ادغام</b>\n<blockquote>مکان اصلی:\n<b>${tgEscape(keep.name)}</b>\n\nمکان تکراری:\n<b>${tgEscape(duplicate.name)}</b>\n\nفاصله: <code>${distance} متر</code>\n\nبازدیدها و اطلاعات تکمیلی منتقل می‌شوند؛ رکورد تکراری حذف خواهد شد.</blockquote>`, { reply_markup: { inline_keyboard: [[{ text: '✓ تأیید ادغام', callback_data: `dmerge:${keepId}:${duplicateId}` }, { text: 'لغو', callback_data: 'dcancel' }]] } });
+    return tgMessage(env, chatId, `<b>⚠️ تأیید نهایی ادغام</b>\n<blockquote>مکان اصلی:\n<b>${tgEscape(keep.name)}</b>\n\nمکان تکراری:\n<b>${tgEscape(duplicate.name)}</b>\n\nفاصله: <code>${distance} متر</code>\n\nبازدیدها و اطلاعات تکمیلی منتقل می‌شوند؛ رکورد تکراری حذف خواهد شد.</blockquote>`, { reply_markup: { inline_keyboard: [[{ text: '✓ تأیید ادغام', callback_data: `dm:${compactTelegramId(keepId)}:${compactTelegramId(duplicateId)}` }, { text: 'لغو', callback_data: 'dcancel' }]] } });
   }
-  if (data.startsWith('dmerge:')) {
+  if (data.startsWith('dm:') || data.startsWith('dmerge:')) {
     await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id, text: 'در حال بررسی و ادغام…' });
     if (!admin) return tgMessage(env, chatId, '⛔ دسترسی ادمین لازم است.');
-    const [, keepId, duplicateId] = data.split(':');
+    const [, keepToken, duplicateToken] = data.split(':');
+    const compact = data.startsWith('dm:');
+    const keepId = compact ? expandTelegramId(keepToken) : keepToken;
+    const duplicateId = compact ? expandTelegramId(duplicateToken) : duplicateToken;
     const current = await getBotData(env);
     const threshold = duplicateThreshold(current.settings?.duplicateThreshold, 35);
     try {
       const result = await adminMutation(env, 'place.merge', { keepId, duplicateIds: [duplicateId], threshold }, update.update_id);
+      if (result.result?.duplicate) return tgMessage(env, chatId, 'ℹ️ این درخواست ادغام قبلاً پردازش شده است؛ تغییری دوباره اعمال نشد.');
       return tgMessage(env, chatId, `<b>✅ ادغام با موفقیت انجام شد</b>\n<blockquote>مکان اصلی: ${tgEscape(result.result.keepId)}\nرکورد حذف‌شده: <code>${tgEscape(duplicateId)}</code>\nبازدیدها به مکان اصلی منتقل شدند.</blockquote>\n<code>DATA CLEANUP · COMMITTED</code>`);
     } catch (error) {
       return tgMessage(env, chatId, `⚠️ ادغام انجام نشد: ${tgEscape(error.message)}`);

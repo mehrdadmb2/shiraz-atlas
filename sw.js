@@ -1,5 +1,5 @@
 /* Shiraz Atlas offline shell + visited map-tile cache. No bulk tile prefetch. */
-const STATIC_CACHE = 'shiraz-atlas-static-v1.4.0';
+const STATIC_CACHE = 'shiraz-atlas-static-v1.5.0';
 const TILE_CACHE = 'shiraz-atlas-visited-map-tiles-v1';
 const TILE_HOSTS = new Set(['tile.openstreetmap.org', 'tile.openmaps.fr']);
 const CORE_ASSETS = [

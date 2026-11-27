@@ -177,7 +177,7 @@
 
   <!-- Login modal -->
   <div class="modal-backdrop hidden" id="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-title">
-    <div class="modal glass modal-narrow"><button class="modal-close" data-close="login-modal" aria-label="بستن">×</button><div class="modal-emblem">⌑</div><span class="mini-kicker">PRIVATE CONTROL ROOM</span><h2 id="login-title">ورود مدیر اطلس</h2><p class="modal-subtitle">برای مدیریت اطلاعات و مشاهده مسیرهای خصوصی، رمز ادمین را وارد کن.</p><form id="login-form"><label class="field-label">رمز عبور ادمین<input id="admin-password" type="password" autocomplete="current-password" required minlength="1" placeholder="رمز ورود..." dir="auto"></label><div class="form-error" id="login-error"></div><button class="button button-primary button-block" type="submit">ورود امن به پنل <span>↗</span></button></form><small class="modal-footnote">🔒 رمز در مرورگر ذخیره نمی‌شود؛ فقط نشست موقت امضاشده نگه‌داری می‌شود.</small></div>
+    <div class="modal glass modal-narrow"><button class="modal-close" data-close="login-modal" aria-label="بستن">×</button><div class="modal-emblem">⌑</div><span class="mini-kicker">PRIVATE CONTROL ROOM</span><h2 id="login-title">ورود مدیر اطلس</h2><p class="modal-subtitle">برای مدیریت اطلاعات و مشاهده مسیرهای خصوصی، با رمز پنل سایت وارد شو. توکن GitHub فقط در Cloudflare Worker نگهداری می‌شود و نباید در مرورگر وارد شود.</p><form id="login-form"><label class="field-label">رمز عبور ادمین<input id="admin-password" type="password" autocomplete="current-password" required minlength="1" placeholder="رمز ورود..." dir="auto"></label><div class="form-error" id="login-error"></div><button class="button button-primary button-block" type="submit">ورود امن به پنل <span>↗</span></button></form><small class="modal-footnote">🔒 رمز در مرورگر ذخیره نمی‌شود؛ فقط نشست موقت امضاشده نگه‌داری می‌شود.</small></div>
   </div>
 
   <!-- Place modal -->
@@ -235,7 +235,7 @@
       <div class="form-actions place-detail-actions">
         <button class="button button-quiet" id="place-detail-map">⌖ نمایش روی نقشه</button>
         <button class="button button-outline" id="place-detail-route">↗ مسیریابی</button>
-        <button class="button button-primary admin-only hidden" id="place-detail-edit">✎ ویرایش تمام جزئیات</button>
+        <button class="button button-primary" id="place-detail-edit">✎ ویرایش تمام جزئیات</button>
       </div>
     </div>
   </div>

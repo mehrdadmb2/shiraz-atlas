@@ -10,7 +10,7 @@
     <a href="https://shiraz-atlas.game-developer-mb.workers.dev/api/health"><img src="https://img.shields.io/website?url=https%3A%2F%2Fshiraz-atlas.game-developer-mb.workers.dev%2Fapi%2Fhealth&label=API%20health&style=for-the-badge" alt="API health"></a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/Version-1.4.0-8b7cff?style=flat-square">
+    <img src="https://img.shields.io/badge/Version-1.5.0-8b7cff?style=flat-square">
     <img src="https://img.shields.io/badge/Frontend-GitHub%20Pages-181717?style=flat-square&logo=github">
     <img src="https://img.shields.io/badge/API-Cloudflare%20Workers-F38020?style=flat-square&logo=cloudflare">
     <img src="https://img.shields.io/badge/Map-Leaflet%20%2B%20OSM-72b85a?style=flat-square">
@@ -191,3 +191,28 @@ Each place can be labeled for **walking, car, motorcycle, public transport, and 
 ### GitHub token permissions
 
 Create a Fine-grained PAT scoped only to the private `shiraz-atlas-data` repository, with **Contents: Read and write** and Metadata read-only. Store it as the Cloudflare Worker secret `GITHUB_TOKEN`. Never place it in `js/config.js`, GitHub Pages, HTML, or a public repository. The website writes through the authenticated Worker API only.
+
+
+## v1.5.0 — Telegram, GitHub diagnostics & edit-flow fixes
+
+- Fixed the `peditmenu:` off-by-one ID parsing bug.
+- Compact UUID callback references keep Telegram `callback_data` within its 64-byte limit; callback payloads are validated before sending.
+- `/adminadd` and `/adminremove` support interactive ID entry; `/cancel` clears pending admin/edit sessions.
+- GitHub diagnostics use raw GitHub for public source checks and the correct private repository metadata endpoint.
+- GitHub Pages place edit actions are visible to visitors and prompt for the website admin password when needed.
+- Automatic naming now falls back from Nominatim to a bounded Overpass named-POI search; existing unnamed places can be checked individually from the Telegram edit menu.
+- GitHub Actions run Worker regression tests and frontend JavaScript syntax checks before Pages deployment.
+
+See [UPGRADE-1.5.0-FA.md](UPGRADE-1.5.0-FA.md) for deployment and token permissions.
+
+
+## v1.5.0 · Reliability & interaction fixes
+
+- Fixed Telegram edit callback ID parsing and compacted UUID callback references to respect Telegram's 64-byte limit.
+- Added interactive `/adminadd` and `/adminremove` flows.
+- Repaired GitHub diagnostics and improved actionable 401/403/404 write errors.
+- Exposed edit entry points on every GitHub Pages place card; admin login is prompted when required.
+- Added Nominatim → Overpass fallback for nearby named POIs and per-place re-detection in Telegram.
+- Added regression tests and frontend syntax checks to GitHub Actions.
+
+See [UPGRADE-1.5.0-FA.md](UPGRADE-1.5.0-FA.md).

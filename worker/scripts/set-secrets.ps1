@@ -36,7 +36,7 @@ Write-Host "`nShiraz Atlas - Cloudflare Worker Secrets`n" -ForegroundColor Green
 Write-Host 'Sensitive values are entered as secure prompts and are not saved in this folder.'
 
 $telegramToken = Read-SecretValue 'Enter the Telegram BotFather token'
-$githubToken = Read-SecretValue 'Enter the GitHub Fine-grained token (Contents read/write on private shiraz-atlas-data only)'
+$githubToken = Read-SecretValue 'Enter GitHub Fine-grained token (Metadata read + Contents read/write on shiraz-atlas-data only)'
 $adminIds = Read-Host 'Enter Telegram numeric admin IDs separated by commas. The first ID becomes the owner.'
 $adminPassword = Read-SecretValue 'Enter the website admin password (any non-empty length and characters)'
 
