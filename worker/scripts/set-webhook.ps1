@@ -62,6 +62,7 @@ $commands = @(
     @{ command = 'visit'; description = 'ثبت بازدید (فقط ادمین)' },
     @{ command = 'route'; description = 'ثبت مسیر (فقط ادمین)' },
     @{ command = 'stats'; description = 'آمار خصوصی اطلس (فقط ادمین)' },
+    @{ command = 'duplicates'; description = 'اسکن و ادغام مکان‌های تکراری (ادمین)' },
     @{ command = 'categoryadd'; description = 'افزودن دسته‌بندی (فقط ادمین)' },
     @{ command = 'tagadd'; description = 'افزودن برچسب (فقط ادمین)' },
     @{ command = 'test'; description = 'تست سلامت پروژه (ادمین)' },

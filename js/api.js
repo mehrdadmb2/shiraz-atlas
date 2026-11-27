@@ -13,6 +13,7 @@
     health:()=>request('/api/health'),
     diagnostics:()=>request('/api/admin/diagnostics',{auth:true}),
     duplicates:threshold=>request(`/api/admin/duplicates?threshold=${encodeURIComponent(threshold||35)}`,{auth:true}),
+    nameSuggestion:(lat,lng)=>request(`/api/admin/name-suggestion?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`,{auth:true,timeout:8000}),
     state:async admin=>request(admin?'/api/admin/state':'/api/state',{auth:Boolean(admin)}),
     login:async password=>{const data=await request('/api/auth/login',{method:'POST',body:{password}});setSession(data.token);return data;},
     logout:async()=>{try{await request('/api/auth/logout',{method:'POST',auth:true});}catch{}clearSession();},

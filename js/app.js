@@ -3,7 +3,7 @@
   const $$ = (s, root=document) => [...root.querySelectorAll(s)];
   const U = window.AtlasUtils, API = window.AtlasAPI;
   let state = { places:[], visits:[], routes:[], categories:U.categoryDefaults, tags:U.defaultTags, settings:{center:{lat:29.5918,lng:52.5837},explorationBounds:{south:29.47,west:52.42,north:29.73,east:52.78,step:.004}} };
-  let admin = false, currentView='overview', categoryFilter='', tagFilter='', searchText='', userLocation=null, discoveryItems=[], drawingActive=false, gpsWatch=null, placePage=1, selectedPlace=null, pendingRouteId='';
+  let admin = false, currentView='overview', categoryFilter='', tagFilter='', searchText='', userLocation=null, discoveryItems=[], drawingActive=false, gpsWatch=null, placePage=1, selectedPlace=null, detailPlaceId='', pendingRouteId='';
   const PAGE_SIZE=8;
   const ACCESS_LABELS={walking:'🚶 پیاده‌روی',car:'🚗 خودرو',motorcycle:'🏍️ موتورسیکلت',public_transport:'🚌 حمل‌ونقل عمومی',bicycle:'🚲 دوچرخه'};
   const toast=(message,type='success')=>{const el=document.createElement('div');el.className=`toast ${type}`;el.textContent=message;$('#toast-root').appendChild(el);setTimeout(()=>el.remove(),4500);};
@@ -69,7 +69,7 @@
     const phone=String(p.phone||'').replace(/[^0-9+]/g,'');
     const website=safeUrl(p.website);
     const contacts=(phone||website)?`<div class="place-contact">${phone?`<a href="tel:${U.esc(phone)}">☎ تماس</a>`:''}${website?`<a href="${U.esc(website)}" target="_blank" rel="noopener noreferrer">↗ وب‌سایت</a>`:''}</div>`:'';
-    return `<article class="place-card" data-place-id="${U.esc(p.id)}"><div class="place-visual">${visual}<span class="place-category">${U.esc(c.icon||'✦')} ${U.esc(c.name)}</span><span class="place-status">${p.visibility==='private'?'🔒 خصوصی':visited?'✓ بازدید شده':p.status==='closed'?'وضعیت نامشخص':'در اطلس'}</span></div><div class="place-body"><div class="place-title-row"><h3>${U.esc(p.name)}</h3>${p.rating!=null?`<span class="place-rating">★ ${U.esc(p.rating)}/5</span>`:''}</div><p class="place-description">${U.esc(p.description||p.address||'برای این مکان هنوز توضیحی ثبت نشده است.')}</p><div class="place-tags">${tags}${access}</div><div class="place-meta"><span>${fee}</span><span>${distance?`⌖ ${distance}`:''}</span></div>${extraMeta?`<div class="place-extra-meta">${extraMeta}</div>`:''}${contacts}<div class="place-actions"><button data-action="focus" data-id="${U.esc(p.id)}">⌖ نقشه</button><button data-action="navigate" data-id="${U.esc(p.id)}">↗ مسیر</button><button data-action="preview-route" data-id="${U.esc(p.id)}">⌁ مسیر روی نقشه</button>${admin?`<button data-action="visit" data-id="${U.esc(p.id)}">✓ بازدید</button><button data-action="edit" data-id="${U.esc(p.id)}">✎ ویرایش</button><button data-action="delete" data-id="${U.esc(p.id)}">🗑 حذف</button>`:''}</div></div></article>`;
+    return `<article class="place-card place-card-clickable" role="group" tabindex="0" data-action="detail" data-id="${U.esc(p.id)}" data-place-id="${U.esc(p.id)}"><div class="place-visual">${visual}<span class="place-category">${U.esc(c.icon||'✦')} ${U.esc(c.name)}</span><span class="place-status">${p.visibility==='private'?'🔒 خصوصی':visited?'✓ بازدید شده':p.status==='closed'?'وضعیت نامشخص':'در اطلس'}</span></div><div class="place-body"><div class="place-title-row"><h3>${U.esc(p.name)}</h3><button class="place-detail-trigger" data-action="detail" data-id="${U.esc(p.id)}" aria-label="مشاهده جزئیات ${U.esc(p.name)}">جزئیات ↗</button>${p.rating!=null?`<span class="place-rating">★ ${U.esc(p.rating)}/5</span>`:''}</div><p class="place-description">${U.esc(p.description||p.address||'برای این مکان هنوز توضیحی ثبت نشده است.')}</p><div class="place-tags">${tags}${access}</div><div class="place-meta"><span>${fee}</span><span>${distance?`⌖ ${distance}`:''}</span></div>${extraMeta?`<div class="place-extra-meta">${extraMeta}</div>`:''}${contacts}<div class="place-actions"><button data-action="focus" data-id="${U.esc(p.id)}">⌖ نقشه</button><button data-action="navigate" data-id="${U.esc(p.id)}">↗ مسیر</button><button data-action="preview-route" data-id="${U.esc(p.id)}">⌁ مسیر روی نقشه</button>${admin?`<button data-action="visit" data-id="${U.esc(p.id)}">✓ بازدید</button><button data-action="edit" data-id="${U.esc(p.id)}">✎ ویرایش</button><button data-action="delete" data-id="${U.esc(p.id)}">🗑 حذف</button>`:''}</div></div></article>`;
   }
   function renderPlaces(){const root=$('#place-grid');if(!root)return;const list=visiblePlaces();$('#places-result-count').textContent=`${U.fmt(list.length)} نتیجه`;$('#map-visible-count').textContent=U.fmt(list.length);root.innerHTML=list.slice(0,placePage*PAGE_SIZE).map(placeCard).join('')||`<div class="empty-state glass"><span>⌖</span><h3>مکانی پیدا نشد</h3><p>${allPlaces().length?'فیلترها را تغییر بده یا عبارت دیگری جست‌وجو کن.':'هنوز مکانی ذخیره نشده؛ از ربات لوکیشن بفرست یا با ورود ادمین اولین مکان را ثبت کن.'}</p></div>`;$('#load-more-wrap').classList.toggle('hidden',list.length<=placePage*PAGE_SIZE);if(window.AtlasMap.map)AtlasMap.renderPlaces(list,state.categories);}
   function renderStats(){const places=allPlaces(),routes=state.routes||[],visits=state.visits||[],coverage=calcCoverage(routes);setText('#stat-places',U.fmt(places.length));setText('#stat-routes',U.fmt(routes.length));setText('#stat-visits',U.fmt(visits.length));setText('#stat-coverage',`${U.fmt(coverage.percent.toFixed(1))}٪`);$('#coverage-mini-bar').style.width=`${coverage.percent}%`;}
@@ -195,11 +195,77 @@
   async function locateMe(){try{userLocation=await requestPosition();AtlasMap.showUser(userLocation);AtlasMap.focus(userLocation.lat,userLocation.lng,15);renderPlaces();toast(`موقعیت تو دریافت شد · دقت حدود ${Math.round(userLocation.accuracy||0)} متر`);loadWeather(userLocation.lat,userLocation.lng,'موقعیت فعلی شما');}catch(e){toast(e.message,'error');}}
   function randomPlace(){const pool=allPlaces().filter(p=>p.visibility!=='private'&&p.status!=='closed');if(!pool.length){toast('هنوز مکان عمومی برای انتخاب تصادفی ثبت نشده است.','error');return;}const p=pool[Math.floor(Math.random()*pool.length)];selectedPlace=p;AtlasMap.focus(p.lat,p.lng,16);showPlaceToast(p);}
   function showPlaceToast(p){const c=U.categoryById(state.categories,p.categoryId);toast(`✧ مقصد شانسی: ${p.name} · ${c.name}`);}
-  function openPlaceForm(place=null){if(!admin)return showModal('login-modal');$('#place-form').reset();$('#place-id').value=place?.id||'';$('#place-modal-title').textContent=place?'ویرایش مکان':'افزودن مکان جدید';$('#place-name').value=place?.name||'';$('#place-category').value=place?.categoryId||state.categories[0]?.id||'';$('#place-status').value=place?.status||'active';$('#place-lat').value=place?.lat??'';$('#place-lng').value=place?.lng??'';$('#place-address').value=place?.address||'';$('#place-description').value=place?.description||'';$('#place-entry-fee').value=place?.entryFee??'';$('#place-estimated-cost').value=place?.estimatedCost??'';$('#place-rating').value=place?.rating??'';$('#place-best-time').value=place?.bestTime||'';$('#place-phone').value=place?.phone||'';$('#place-website').value=place?.website||'';$('#place-tags').value=(place?.tags||[]).join(', ');$('#place-image').value=place?.imageUrl||'';$('#place-notes').value=place?.notes||'';$('#place-access-notes').value=place?.accessNotes||'';$$('input[name="place-access-mode"]').forEach(el=>{el.checked=(place?.accessModes||[]).includes(el.value);});$('#place-public').checked=place?.visibility!=='private';showModal('place-modal');}
+  const detailField=(label,value,wide=false)=>`<div class="detail-field${wide?' detail-field-wide':''}"><span>${U.esc(label)}</span><strong>${value===null||value===undefined||String(value).trim()===''?'<i class="detail-empty">ثبت نشده</i>':value}</strong></div>`;
+  function openPlaceDetails(place){
+    if(!place)return;
+    detailPlaceId=place.id;selectedPlace=place;
+    const category=U.categoryById(state.categories,place.categoryId);
+    const status=({active:'فعال / قابل مراجعه',planned:'در برنامه بازدید',closed:'تعطیل یا نامشخص'})[place.status]||'نامشخص';
+    const visibility=place.visibility==='private'?'خصوصی':'عمومی';
+    const access=(place.accessModes||[]).map(x=>ACCESS_LABELS[x]||x).join('، ');
+    const tags=(place.tags||[]).map(x=>`<span class="detail-chip">#${U.esc(x)}</span>`).join('')||'';
+    const names=(place.alternateNames||[]).map(x=>`<span class="detail-chip">${U.esc(x)}</span>`).join('')||'';
+    const image=safeUrl(place.imageUrl);
+    const visits=(state.visits||[]).filter(v=>v.placeId===place.id);
+    const fields=[
+      detailField('دسته‌بندی',`${U.esc(category.icon||'✦')} ${U.esc(category.name)}`),
+      detailField('وضعیت',U.esc(status)),
+      detailField('نمایش',U.esc(visibility)),
+      detailField('آدرس / محله',U.esc(place.address||''),true),
+      detailField('عرض جغرافیایی',Number.isFinite(Number(place.lat))?`<code>${Number(place.lat).toFixed(6)}</code>`:''),
+      detailField('طول جغرافیایی',Number.isFinite(Number(place.lng))?`<code>${Number(place.lng).toFixed(6)}</code>`:''),
+      detailField('توضیحات',U.esc(place.description||''),true),
+      detailField('هزینه ورودی',place.entryFee==null?'':`${U.money(place.entryFee)} تومان`),
+      detailField('هزینه تقریبی هر نفر',place.estimatedCost==null?'':`${U.money(place.estimatedCost)} تومان`),
+      detailField('امتیاز شخصی',place.rating==null?'':`${U.esc(place.rating)} / 5`),
+      detailField('بهترین زمان مراجعه',U.esc(place.bestTime||'')),
+      detailField('روش‌های دسترسی',U.esc(access)),
+      detailField('توضیح دسترسی / پارکینگ',U.esc(place.accessNotes||''),true),
+      detailField('شماره تماس',place.phone?`<a href="tel:${U.esc(String(place.phone).replace(/[^0-9+]/g,''))}">${U.esc(place.phone)}</a>`:''),
+      detailField('وب‌سایت',safeUrl(place.website)?`<a href="${U.esc(safeUrl(place.website))}" target="_blank" rel="noopener noreferrer">${U.esc(place.website)}</a>`:'',true),
+      detailField('برچسب‌ها',tags?`<span class="detail-chip-row">${tags}</span>`:'',true),
+      detailField('نام‌های جایگزین',names?`<span class="detail-chip-row">${names}</span>`:'',true),
+      detailField('منبع ثبت',U.esc(place.source||'')),
+      detailField('روش تشخیص نام',place.nameSource==='openstreetmap-reverse'?'<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap · Reverse geocoding</a>':U.esc(place.nameSource||'')),
+      detailField('اطمینان نام',U.esc(place.nameConfidence||'')),
+      detailField('تعداد بازدیدها',admin?U.fmt(visits.length):''),
+      detailField('لینک تصویر',image?`<a href="${U.esc(image)}" target="_blank" rel="noopener noreferrer">مشاهده تصویر ↗</a>`:'',true),
+      ...(admin?[detailField('یادداشت خصوصی',U.esc(place.notes||''),true)]:[]),
+      detailField('شناسه مکان',`<code>${U.esc(place.id)}</code>`,true),
+      ...(admin&&place.mergedPlaceIds?.length?[detailField('شناسه‌های ادغام‌شده',`<code>${U.esc(place.mergedPlaceIds.join(', '))}</code>`,true)]:[]),
+      detailField('تاریخ ثبت',place.createdAt?U.esc(U.shortDate(place.createdAt)):''),
+      detailField('آخرین ویرایش',place.updatedAt?U.esc(U.shortDate(place.updatedAt)):'')
+    ];
+    $('#place-detail-title').textContent=place.name||'مکان بدون نام';
+    $('#place-detail-subtitle').textContent=`${category.icon||'✦'} ${category.name} · ${place.visibility==='private'?'خصوصی':'نمایش عمومی'}`;
+    $('#place-detail-emblem').textContent=category.icon||'⌖';
+    $('#place-detail-content').innerHTML=`${image?`<div class="detail-image-wrap"><img src="${U.esc(image)}" alt="${U.esc(place.name||'تصویر مکان')}" loading="lazy"></div>`:''}<div class="detail-field-grid">${fields.join('')}</div>`;
+    $('#place-detail-edit').classList.toggle('hidden',!admin);
+    showModal('place-detail-modal');
+  }
+  function editDetailPlace(){
+    const place=allPlaces().find(p=>p.id===detailPlaceId);
+    if(!place)return;
+    hideModal('place-detail-modal');openPlaceForm(place);
+  }
+  function openPlaceForm(place=null){if(!admin)return showModal('login-modal');$('#place-form').reset();$('#place-id').value=place?.id||'';$('#place-modal-title').textContent=place?'ویرایش مکان':'افزودن مکان جدید';$('#place-name').value=place?.name||'';$('#place-category').value=place?.categoryId||state.categories[0]?.id||'';$('#place-status').value=place?.status||'active';$('#place-lat').value=place?.lat??'';$('#place-lng').value=place?.lng??'';$('#place-address').value=place?.address||'';$('#place-description').value=place?.description||'';$('#place-entry-fee').value=place?.entryFee??'';$('#place-estimated-cost').value=place?.estimatedCost??'';$('#place-rating').value=place?.rating??'';$('#place-best-time').value=place?.bestTime||'';$('#place-phone').value=place?.phone||'';$('#place-website').value=place?.website||'';$('#place-tags').value=(place?.tags||[]).join(', ');$('#place-alternate-names').value=(place?.alternateNames||[]).join(', ');$('#place-source').value=place?.source||'website';$('#place-image').value=place?.imageUrl||'';$('#place-notes').value=place?.notes||'';$('#place-access-notes').value=place?.accessNotes||'';$$('input[name="place-access-mode"]').forEach(el=>{el.checked=(place?.accessModes||[]).includes(el.value);});$('#place-public').checked=place?.visibility!=='private';showModal('place-modal');}
+  async function suggestPlaceName(){
+    const lat=Number($('#place-lat').value),lng=Number($('#place-lng').value);
+    if(!Number.isFinite(lat)||!Number.isFinite(lng))return toast('ابتدا مختصات معتبر را وارد کن.','error');
+    const button=$('#suggest-place-name');button.disabled=true;button.textContent='در حال بررسی نقشه…';
+    try{
+      const result=await API.nameSuggestion(lat,lng);
+      if(!result.suggestion)return toast('در داده‌های نقشه نام قابل‌اعتماد و نزدیکی پیدا نشد؛ نام را دستی وارد کن.','error');
+      $('#place-name').value=result.suggestion.name;
+      if(!$('#place-address').value.trim())$('#place-address').value=result.suggestion.address||'';
+      toast(`نام پیشنهادی «${result.suggestion.name}» پیدا شد · حدود ${U.fmt(result.suggestion.distanceMeters)} متر از نقطه`);
+    }catch(error){apiError(error);}
+    finally{button.disabled=false;button.textContent='✦ تشخیص نام از روی مختصات';}
+  }
   async function savePlace(event){
     event.preventDefault();
     const id=$('#place-id').value;
-    const payload={name:$('#place-name').value,categoryId:$('#place-category').value,status:$('#place-status').value,lat:Number($('#place-lat').value),lng:Number($('#place-lng').value),address:$('#place-address').value,description:$('#place-description').value,entryFee:$('#place-entry-fee').value===''?null:Number($('#place-entry-fee').value),estimatedCost:$('#place-estimated-cost').value===''?null:Number($('#place-estimated-cost').value),rating:$('#place-rating').value===''?null:Number($('#place-rating').value),bestTime:$('#place-best-time').value,phone:$('#place-phone').value,website:$('#place-website').value,tags:$('#place-tags').value.split(/[,،]/).map(x=>x.trim()).filter(Boolean),accessModes:$$('input[name="place-access-mode"]:checked').map(el=>el.value),accessNotes:$('#place-access-notes').value,imageUrl:$('#place-image').value,notes:$('#place-notes').value,visibility:$('#place-public').checked?'public':'private'};
+    const payload={name:$('#place-name').value,categoryId:$('#place-category').value,status:$('#place-status').value,lat:Number($('#place-lat').value),lng:Number($('#place-lng').value),address:$('#place-address').value,description:$('#place-description').value,entryFee:$('#place-entry-fee').value===''?null:Number($('#place-entry-fee').value),estimatedCost:$('#place-estimated-cost').value===''?null:Number($('#place-estimated-cost').value),rating:$('#place-rating').value===''?null:Number($('#place-rating').value),bestTime:$('#place-best-time').value,phone:$('#place-phone').value,website:$('#place-website').value,tags:$('#place-tags').value.split(/[,،]/).map(x=>x.trim()).filter(Boolean),alternateNames:$('#place-alternate-names').value.split(/[,،]/).map(x=>x.trim()).filter(Boolean),source:$('#place-source').value.trim()||'website',accessModes:$$('input[name="place-access-mode"]:checked').map(el=>el.value),accessNotes:$('#place-access-notes').value,imageUrl:$('#place-image').value,notes:$('#place-notes').value,visibility:$('#place-public').checked?'public':'private'};
     if(!Number.isFinite(payload.lat)||!Number.isFinite(payload.lng)){toast('مختصات معتبر وارد کن.','error');return;}
     const action=id?'place.update':'place.create',body=id?{...payload,id}:payload;
     try{
@@ -250,8 +316,8 @@
     summary.textContent='در حال بررسی مختصات مکان‌ها…';root.innerHTML='';
     try{
       const result=await API.duplicates(threshold);
-      summary.textContent=`${U.fmt(result.scannedPlaces)} مکان بررسی شد · ${U.fmt(result.groups.length)} گروه تکراری · ${U.fmt(result.duplicatePlaces)} مورد قابل ادغام · آستانه ${result.threshold} متر`;
-      if(!result.groups.length){root.innerHTML='<div class="empty-state"><span>✓</span><h3>تکراری نزدیکی پیدا نشد</h3><p>در آستانه انتخابی، مکان‌هایی با فاصله کمتر یا مساوی این مقدار شناسایی نشدند.</p></div>';return;}
+      summary.textContent=`${U.fmt(result.scannedPlaces)} رکورد بررسی شد · ${U.fmt(result.validCoordinatePlaces??result.scannedPlaces)} مکان دارای مختصات معتبر · ${U.fmt(result.groups.length)} گروه تکراری · ${U.fmt(result.duplicatePlaces)} مورد قابل ادغام · ${U.fmt(result.skippedPlaces||0)} رکورد بدون مختصات معتبر · آستانه ${result.threshold} متر`;
+      $('#duplicate-merge-all').classList.toggle('hidden',!result.groups.length);if(!result.groups.length){root.innerHTML='<div class="empty-state"><span>✓</span><h3>تکراری نزدیکی پیدا نشد</h3><p>در آستانه انتخابی، مکان‌هایی با فاصله کمتر یا مساوی این مقدار شناسایی نشدند.</p></div>';return;}
       root.innerHTML=result.groups.map((group,index)=>`<article class="duplicate-group"><div class="duplicate-group-heading"><b>گروه ${U.fmt(index+1)}</b><span>شعاع بررسی ${U.fmt(group.threshold)} متر</span></div><div class="duplicate-keep"><small>مکان اصلی پیشنهادی · حفظ می‌شود</small><strong>📍 ${U.esc(group.keep.name)}</strong><code>${U.esc(group.keep.id)}</code></div><div class="duplicate-members">${group.duplicates.map(item=>`<div class="duplicate-member"><div><b>${U.esc(item.name)}</b><small>${U.fmt(item.distanceMeters)} متر از مکان اصلی · ${U.esc(item.id)}</small></div><span>تکراری احتمالی</span></div>`).join('')}</div><button class="button button-primary" data-action="merge-duplicates" data-keep="${U.esc(group.keep.id)}" data-ids="${U.esc(group.duplicates.map(x=>x.id).join(','))}" data-threshold="${group.threshold}">✓ ادغام و حذف ${U.fmt(group.duplicates.length)} مورد تکراری</button></article>`).join('');
     }catch(error){summary.textContent=`بررسی انجام نشد: ${error.message}`;}
   }
@@ -264,10 +330,33 @@
     try{const result=await API.mutate('place.merge',{keepId,duplicateIds,threshold});toast(`${result.result.mergedCount} مکان ادغام شد؛ بازدیدها حفظ شدند.`);await loadState();await scanDuplicates();}
     catch(error){apiError(error);button.disabled=false;button.textContent='تلاش دوباره برای ادغام';}
   }
+  async function mergeAllDuplicates(){
+    const threshold=Number($('#duplicate-threshold').value||35);
+    const report=await API.duplicates(threshold);
+    const groups=report.groups||[];
+    const total=groups.reduce((n,g)=>n+g.duplicates.length,0);
+    if(!total)return toast('موردی برای ادغام وجود ندارد.');
+    if(!confirm(`تأیید نهایی پاک‌سازی کامل؟\n\n${groups.length} گروه و ${total} مکان تکراری ادغام می‌شوند.\nاطلاعات تکمیلی و تمام بازدیدها حفظ می‌شوند؛ رکوردهای تکراری حذف خواهند شد.\n\nاین عملیات از طریق GitHub در دیتای خصوصی ثبت می‌شود.`))return;
+    const button=$('#duplicate-merge-all');button.disabled=true;button.textContent='در حال ادغام گروه‌ها…';
+    let merged=0;
+    try{
+      for(const group of groups){
+        const duplicateIds=group.duplicates.map(item=>item.id);
+        if(!duplicateIds.length)continue;
+        await API.mutate('place.merge',{keepId:group.keep.id,duplicateIds,threshold});
+        merged+=duplicateIds.length;
+      }
+      toast(`${U.fmt(merged)} مکان تکراری با موفقیت ادغام شد.`);
+      await loadState();await scanDuplicates();
+    }catch(error){apiError(error);await loadState().catch(()=>{});await scanDuplicates();}
+    finally{button.disabled=false;button.textContent='✓ ادغام همه گروه‌ها';}
+  }
   async function deletePlace(id){const p=allPlaces().find(x=>x.id===id);if(!p||!confirm(`مکان «${p.name}» حذف شود؟ این کار قابل بازگشت نیست.`))return;try{await API.mutate('place.delete',{id});toast('مکان حذف شد.');await loadState();}catch(e){apiError(e);}}
   async function deleteRoute(id){if(!confirm('این مسیر از تاریخچه حذف شود؟'))return;try{await API.mutate('route.delete',{id});toast('مسیر حذف شد.');await loadState();}catch(e){apiError(e);}}
   async function actionClick(event){
-    const b=event.target.closest('[data-action]');if(!b)return;const action=b.dataset.action,id=b.dataset.id;if(action==='merge-duplicates'){await mergeDuplicates(b);return;}
+    if(event.target.closest('a'))return;const b=event.target.closest('[data-action]');if(!b)return;const action=b.dataset.action,id=b.dataset.id;if(action==='merge-duplicates'){await mergeDuplicates(b);return;}
+    if(action==='detail'){const p=allPlaces().find(x=>x.id===id);if(p)openPlaceDetails(p);return;}
+    if(action==='detail-edit'){editDetailPlace();return;}
     if(action==='preview-route'){const p=allPlaces().find(x=>x.id===id);if(!p)return;try{if(!userLocation)userLocation=await requestPosition();AtlasMap.showUser(userLocation);toast('در حال محاسبه مسیر رانندگی...');const route=await API.route(userLocation,p);AtlasMap.showRoutePreview(route.geometry);switchView('map');const minutes=Math.round(route.durationSeconds/60);const km=(route.distanceMeters/1000).toLocaleString('fa-IR',{maximumFractionDigits:1});toast(`مسیر رانندگی: ${km} کیلومتر · حدود ${U.fmt(minutes)} دقیقه. برای ترافیک زنده، Google Maps را باز کن.`);const info=document.createElement('div');info.className='toast';info.textContent=`${p.name} · ${km} km · ${U.fmt(minutes)} دقیقه (تخمینی)`;$('#toast-root').appendChild(info);setTimeout(()=>info.remove(),5000);}catch(e){toast(e.message,'error');if(userLocation)window.open(`https://www.google.com/maps/dir/?api=1&origin=${userLocation.lat},${userLocation.lng}&destination=${p.lat},${p.lng}&travelmode=driving`,'_blank','noopener');}return;}
     if(action==='focus'){const p=allPlaces().find(x=>x.id===id);if(p){AtlasMap.focus(p.lat,p.lng);switchView('map');}}
     else if(action==='navigate'){const p=allPlaces().find(x=>x.id===id);if(p)window.open(U.routeGoogleUrl(p),'_blank','noopener');}
@@ -292,7 +381,7 @@
     $('#login-form').addEventListener('submit',login);$('#place-form').addEventListener('submit',savePlace);$('#visit-form').addEventListener('submit',saveVisit);$('#route-form').addEventListener('submit',saveRoute);$('#category-form').addEventListener('submit',addCategory);$('#tag-form').addEventListener('submit',addTag);$('#bounds-form').addEventListener('submit',saveBounds);
     $$('.modal-close,[data-close]').forEach(b=>b.addEventListener('click',()=>{const id=b.dataset.close||b.closest('.modal-backdrop')?.id;if(id==='route-modal'&&drawingActive)cancelDrawing();hideModal(id);}));
     $$('.modal-backdrop').forEach(back=>back.addEventListener('click',e=>{if(e.target===back){if(back.id==='route-modal'&&drawingActive)cancelDrawing();hideModal(back.id);}}));
-    $('#add-place-button').addEventListener('click',()=>openPlaceForm());$('#duplicates-button').addEventListener('click',openDuplicateManager);$('#duplicate-scan-button').addEventListener('click',scanDuplicates);$('#duplicate-groups').addEventListener('click',actionClick);$('#draw-route-button').addEventListener('click',startDrawing);$('#quick-route').addEventListener('click',startDrawing);$('#journey-add-button').addEventListener('click',startDrawing);
+    $('#add-place-button').addEventListener('click',()=>openPlaceForm());$('#suggest-place-name').addEventListener('click',suggestPlaceName);$('#place-detail-edit').addEventListener('click',editDetailPlace);$('#place-detail-map').addEventListener('click',()=>{const p=allPlaces().find(x=>x.id===detailPlaceId);if(p){hideModal('place-detail-modal');AtlasMap.focus(p.lat,p.lng,16);switchView('map');}});$('#place-detail-route').addEventListener('click',()=>{const p=allPlaces().find(x=>x.id===detailPlaceId);if(p){hideModal('place-detail-modal');window.open(U.routeGoogleUrl(p),'_blank','noopener');}});$('#duplicates-button').addEventListener('click',openDuplicateManager);$('#duplicate-scan-button').addEventListener('click',scanDuplicates);$('#duplicate-merge-all').addEventListener('click',mergeAllDuplicates);$('#duplicate-groups').addEventListener('click',actionClick);$('#draw-route-button').addEventListener('click',startDrawing);$('#quick-route').addEventListener('click',startDrawing);$('#journey-add-button').addEventListener('click',startDrawing);
     $('#hero-explore').addEventListener('click',()=>switchView('map'));$('#hero-random').addEventListener('click',randomPlace);$('#quick-random').addEventListener('click',randomPlace);$('#locate-button').addEventListener('click',locateMe);$('#quick-near').addEventListener('click',async()=>{await locateMe();switchView('discover');await discover();});
     $('#map-layer-toggle').addEventListener('click',()=>{const layer=AtlasMap.toggleLayer();toast(layer==='light'?'نقشه روشن فعال شد.':'نقشه تاریک فعال شد.');});
     $('#weather-refresh').addEventListener('click',()=>{const c=state.settings?.center||{lat:29.5918,lng:52.5837};loadWeather(c.lat,c.lng,'شیراز، ایران',true);});$('#fit-map-button').addEventListener('click',()=>AtlasMap.fit(visiblePlaces()));$('#refresh-button').addEventListener('click',async()=>{try{await loadState();await loadWeather(state.settings?.center?.lat||29.5918,state.settings?.center?.lng||52.5837);toast('اطلاعات به‌روزرسانی شد.');}catch(e){apiError(e);}});
@@ -301,7 +390,7 @@
     $('#place-grid').addEventListener('click',actionClick);$('#journey-list').addEventListener('click',actionClick);$('#visit-history-list').addEventListener('click',actionClick);$('#discover-grid').addEventListener('click',actionClick);$('#category-manager-list').addEventListener('click',actionClick);$('#tag-manager-list').addEventListener('click',actionClick);
     $('#discover-button').addEventListener('click',discover);$('#gps-point-button').addEventListener('click',gpsPoint);$('#gps-track-button').addEventListener('click',startGpsTrack);$('#finish-drawing-button').addEventListener('click',finishDrawing);$('#cancel-drawing-button').addEventListener('click',cancelDrawing);
     $('#mobile-menu-button').addEventListener('click',()=>$('#mobile-nav').classList.toggle('open'));
-    document.addEventListener('keydown',e=>{if(e.key==='Escape'){$$('.modal-backdrop').forEach(m=>m.classList.add('hidden'));if(drawingActive)cancelDrawing();}if(e.key==='/'&&!['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){e.preventDefault();$('#map-search-input').focus();}});
+    document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('.place-card-clickable')){e.preventDefault();const p=allPlaces().find(x=>x.id===e.target.dataset.id);if(p)openPlaceDetails(p);}if(e.key==='Escape'){$$('.modal-backdrop').forEach(m=>m.classList.add('hidden'));if(drawingActive)cancelDrawing();}if(e.key==='/'&&!['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){e.preventDefault();$('#map-search-input').focus();}});
     $('#places-section .section-heading-actions').insertAdjacentHTML('beforeend','<button class="button button-quiet admin-only hidden" id="catalog-button">⚙ دسته‌ها و برچسب‌ها</button>');$('#catalog-button').addEventListener('click',openCatalog);
     // A long press is not required; expose an optional live GPS recorder through the drawing bar.
     window.addEventListener('beforeunload',stopGps);

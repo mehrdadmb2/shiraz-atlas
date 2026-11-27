@@ -26,6 +26,12 @@ test('Shiraz Atlas API privacy, admin auth, mutations and Telegram webhook', asy
   let writes = 0;
   const telegramCalls = [];
   const originalFetch = globalThis.fetch;
+  const originalCaches = globalThis.caches;
+  const testCache = new Map();
+  globalThis.caches = { default: {
+    match: async request => testCache.get(request.url)?.clone() || null,
+    put: async (request, response) => { testCache.set(request.url, response.clone()); }
+  } };
   globalThis.fetch = async (input, init = {}) => {
     const url = new URL(String(input));
     if (url.hostname === 'api.github.com' && url.pathname.endsWith('/contents/atlas.json')) {
@@ -39,10 +45,24 @@ test('Shiraz Atlas API privacy, admin auth, mutations and Telegram webhook', asy
         return new Response(JSON.stringify({ content: { sha }, commit: { sha: `commit${writes}` } }), { status: 201 });
       }
     }
+    if (url.hostname === 'nominatim.openstreetmap.org') {
+      return new Response(JSON.stringify({ name: 'Test Garden', category: 'leisure', type: 'garden', addresstype: 'garden', lat: '29.722356', lon: '52.470975', display_name: 'Test Garden, Shiraz', namedetails: { name: 'Test Garden' } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+    if (url.hostname === 'api.github.com' && url.pathname === '/repos/mehrdadmb2/shiraz-atlas-data/') {
+      return new Response(JSON.stringify({ permissions: { push: true, admin: false } }), { status: 200 });
+    }
+    if (url.hostname === 'api.github.com' && url.pathname === '/repos/mehrdadmb2/shiraz-atlas') {
+      return new Response(JSON.stringify({ full_name: 'mehrdadmb2/shiraz-atlas' }), { status: 200 });
+    }
+    if (url.hostname === 'mehrdadmb2.github.io') return new Response('<html>OK</html>', { status: 200 });
     if (url.hostname === 'api.telegram.org') {
       const payload = JSON.parse(init.body || '{}');
-      telegramCalls.push({ method: url.pathname.split('/').pop(), payload });
-      return new Response(JSON.stringify({ ok: true, result: { message_id: telegramCalls.length } }), { status: 200 });
+      const method = url.pathname.split('/').pop();
+      telegramCalls.push({ method, payload });
+      const result = method === 'getMe' ? { username: 'ShirazAtlasBot' } :
+        method === 'getWebhookInfo' ? { url: 'https://worker.test/telegram/webhook', pending_update_count: 0 } :
+        { message_id: telegramCalls.length };
+      return new Response(JSON.stringify({ ok: true, result }), { status: 200 });
     }
     return new Response('{}', { status: 404 });
   };
@@ -100,11 +120,22 @@ test('Shiraz Atlas API privacy, admin auth, mutations and Telegram webhook', asy
     assert.equal(adminState.visits.length, 1);
     assert.equal(adminState.routes.length, 2);
 
+    const publicPlaceView = { update_id: 90, callback_query: { id: 'cb-public-view', from: { id: 98765 }, message: { chat: { id: 98765 } }, data: 'pview:public1' } };
+    response = await call('/telegram/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' }, body: JSON.stringify(publicPlaceView) });
+    assert.equal(response.status, 200);
+    const publicPlaceMessage = telegramCalls.filter(call => call.method === 'sendMessage').at(-1);
+    assert.equal(String(publicPlaceMessage.payload.text || '').includes('must remain private in public API'), false, 'Telegram public place view must not leak admin-only notes');
+
+    response = await call('/api/admin/name-suggestion?lat=29.722356&lng=52.470975', { headers: { Authorization: `Bearer ${session.token}` } });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).suggestion.name, 'Test Garden', 'reverse geocoder returns a nearby named POI suggestion');
+
     response = await call('/api/admin/diagnostics', { headers: { Authorization: `Bearer ${session.token}` } });
     assert.equal(response.status, 200, 'authenticated diagnostics endpoint should respond');
     const diagnostics = await response.json();
     assert.ok(diagnostics.checks.some(x => x.name === 'Private data repository'));
     assert.ok(diagnostics.checks.some(x => x.name === 'GitHub Pages website'));
+    assert.ok(diagnostics.checks.some(x => x.name === 'GitHub data write permission' && x.ok), 'diagnostics verifies GitHub Contents write access');
 
     const mutate = (action, payload) => call('/api/admin/mutate', {
       method: 'POST',
@@ -178,6 +209,7 @@ test('Shiraz Atlas API privacy, admin auth, mutations and Telegram webhook', asy
     });
     assert.equal(response.status, 200);
     assert.equal(data.places.length, 4, 'admin coordinate message should create a place');
+    assert.equal(data.places.find(place => place.lat === 29.722356)?.name, 'Test Garden', 'unnamed Telegram location receives a nearby OSM name when a confident POI match exists');
     assert.ok(data.meta.processedTelegramUpdateIds.includes(999));
 
     const dmsPayload = { update_id: 1000, message: { message_id: 2, from: { id: 12345 }, chat: { id: 12345 }, text: '29°43\'20.5"N 52°28\'15.5"E' } };
@@ -213,6 +245,27 @@ test('Shiraz Atlas API privacy, admin auth, mutations and Telegram webhook', asy
     assert.equal(data.places.find(place => place.id === 'public1').name, 'پارک مرکزی');
     assert.equal(Boolean(data.meta.telegramEditSessions['12345:12345']), false, 'edit session is cleared after a successful update');
 
+    response = await mutate('place.create', { name: 'Duplicate for Telegram review', lat: 29.60005, lng: 52.50005, confirmNearDuplicate: true });
+    assert.equal(response.status, 200);
+    const telegramDuplicateId = (await response.json()).result.id;
+    const duplicateCommand = { update_id: 1007, message: { message_id: 7, from: { id: 12345 }, chat: { id: 12345 }, text: '/duplicates' } };
+    response = await call('/telegram/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' }, body: JSON.stringify(duplicateCommand) });
+    assert.equal(response.status, 200);
+    const duplicateReportMessage = telegramCalls.filter(call => call.method === 'sendMessage').at(-1);
+    assert.ok(String(duplicateReportMessage.payload.text || '').includes('اسکن کامل مکان‌های اطلس'), 'admin duplicate scan command returns a full report');
+    const confirmPair = duplicateReportMessage.payload.reply_markup.inline_keyboard.flat().find(button => String(button.callback_data || '').startsWith('dconfirm:'));
+    assert.ok(confirmPair, 'duplicate report offers an admin confirmation action');
+    const confirmCallback = { update_id: 1008, callback_query: { id: 'cb-dup-confirm', from: { id: 12345 }, message: { chat: { id: 12345 } }, data: confirmPair.callback_data } };
+    response = await call('/telegram/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' }, body: JSON.stringify(confirmCallback) });
+    assert.equal(response.status, 200);
+    const confirmationMessage = telegramCalls.filter(call => call.method === 'sendMessage').at(-1);
+    const mergeButton = confirmationMessage.payload.reply_markup.inline_keyboard.flat().find(button => String(button.callback_data || '').startsWith('dmerge:'));
+    assert.ok(mergeButton, 'a second explicit confirmation is required before merge');
+    const mergeCallback = { update_id: 1009, callback_query: { id: 'cb-dup-merge', from: { id: 12345 }, message: { chat: { id: 12345 } }, data: mergeButton.callback_data } };
+    response = await call('/telegram/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' }, body: JSON.stringify(mergeCallback) });
+    assert.equal(response.status, 200);
+    assert.equal(data.places.some(place => place.id === telegramDuplicateId), false, 'confirmed Telegram merge removes duplicate record');
+
     const ownerRemove = { update_id: 1006, message: { message_id: 5, from: { id: 12345 }, chat: { id: 12345 }, text: '/adminremove 54321' } };
     response = await call('/telegram/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' }, body: JSON.stringify(ownerRemove) });
     assert.equal(response.status, 200);
@@ -225,6 +278,7 @@ test('Shiraz Atlas API privacy, admin auth, mutations and Telegram webhook', asy
     assert.ok(telegramCalls.length >= 2);
   } finally {
     globalThis.fetch = originalFetch;
+    if (originalCaches === undefined) delete globalThis.caches; else globalThis.caches = originalCaches;
   }
 });
 

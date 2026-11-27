@@ -42,6 +42,8 @@ The only authoritative data file is `atlas.json` in the private `shiraz-atlas-da
 | `status` | string | `active`, `planned`, `closed` |
 | `visibility` | string | `public` or `private`; private places excluded from public state |
 | `source` | string | `website`, `telegram`, `openstreetmap`, etc. |
+| `nameSource` | string | `manual`, `openstreetmap-reverse`, or `unresolved`; records how an automatically suggested name was obtained |
+| `nameConfidence` | string | `high`, `medium`, or `none`; informational only, not a guarantee |
 | `createdAt`, `updatedAt` | string | ISO timestamps |
 
 ## Visit
@@ -123,3 +125,12 @@ The admin-only `GET /api/admin/duplicates?threshold=35` endpoint scans coordinat
 `place.merge` keeps one canonical place, transfers missing metadata, unions tags and `accessModes`, redirects visit records to the canonical `placeId`, and removes duplicate place records. The merge endpoint independently verifies that every selected record is within the supplied threshold of the keeper.
 
 Telegram place editing uses `meta.telegramEditSessions` with a 15-minute expiry. Admins tap an edit-field button and send the new value as a normal message; no `/edit` command or place ID is needed.
+
+
+## Place profiles and reverse-name suggestions (schema 1.4)
+
+The public website place cards open a full profile sheet. Every metadata field is shown even when empty; admins can open the complete edit form from that profile and save through the authenticated Worker API. No GitHub token is exposed to the browser.
+
+`GET /api/admin/name-suggestion?lat=...&lng=...` is an authenticated, on-demand reverse-geocoding helper. It uses OpenStreetMap Nominatim and only suggests a name when a named feature of a relevant POI category is returned within 65 metres. New records with blank/generic names use the same helper automatically. If no sufficiently close named feature exists, the record is saved as `مکان بدون نام`; the Worker does not guess a nearby attraction. Nominatim results are cached and must not be used for bulk geocoding.
+
+The admin duplicate scan examines every record with valid coordinates and reports records without valid coordinates separately. It uses complete-link groups so every proposed duplicate in a group is within the selected threshold of the canonical record and each other; ambiguous chains are not automatically merged. Every merge is confirmed by an admin and the Worker rechecks the distances before writing.

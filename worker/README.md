@@ -1,4 +1,4 @@
-# Shiraz Atlas Worker v1.3.0
+# Shiraz Atlas Worker v1.4.0
 
 Cloudflare Worker API + Telegram webhook.
 
@@ -32,10 +32,23 @@ Use Telegram `/test` or `GET /api/admin/diagnostics` with a valid website admin 
 Secrets: `TELEGRAM_BOT_TOKEN`, `GITHUB_TOKEN`, `TELEGRAM_ADMIN_IDS`, `TELEGRAM_OWNER_ID`, `WEB_ADMIN_PASSWORD`, `SESSION_SECRET`, `TELEGRAM_WEBHOOK_SECRET`.
 
 
-## v1.3.0 duplicate and editor flows
+## v1.4.0 duplicate and editor flows
 
 - `GET /api/admin/duplicates?threshold=35` — authenticated spatial duplicate scan; threshold is clamped to 25–50 metres.
 - `place.merge` — verified merge with visit history remapped to the canonical place.
 - `place.create` / coordinate-changing `place.update` returns HTTP 409 `NEARBY_DUPLICATE` unless `confirmNearDuplicate: true` is supplied after admin confirmation.
 - Telegram inline field editing uses `meta.telegramEditSessions`; sessions expire after 15 minutes.
 - Each place supports `accessModes` and `accessNotes`.
+
+
+## v1.4.0 — Place profile editing and duplicate scan
+
+- Website detail profiles are public-safe; private notes appear only in authenticated admin state.
+- All edits are sent to `POST /api/admin/mutate`; GitHub credentials never reach the browser.
+- `/duplicates` scans all records with valid coordinates and presents one-by-one confirmed merge buttons.
+- `GET /api/admin/name-suggestion` is authenticated and reverse-geocodes only on demand.
+- The reverse-name helper accepts named POIs no farther than 65 metres; otherwise it leaves the place unnamed.
+
+### GitHub token permission
+
+The `GITHUB_TOKEN` Worker secret must be a Fine-grained PAT restricted to `shiraz-atlas-data` with **Contents: Read and write** and Metadata read-only. `/api/admin/diagnostics` now checks the repository's `permissions.push` flag. If this check fails, regenerate the token with the correct scope and update only the Worker secret.

@@ -1,11 +1,11 @@
 /* Shiraz Atlas offline shell + visited map-tile cache. No bulk tile prefetch. */
-const STATIC_CACHE = 'shiraz-atlas-static-v1.3.0';
+const STATIC_CACHE = 'shiraz-atlas-static-v1.4.0';
 const TILE_CACHE = 'shiraz-atlas-visited-map-tiles-v1';
 const TILE_HOSTS = new Set(['tile.openstreetmap.org', 'tile.openmaps.fr']);
 const CORE_ASSETS = [
   './', './index.html', './css/styles.css', './js/config.js', './js/utils.js',
   './js/api.js', './js/map.js', './js/app.js', './assets/atlas-mark.svg',
-  './assets/atlas-banner.svg'
+  './assets/atlas-banner.svg', './assets/cyber-topography.webp'
 ];
 const MAX_TILE_ENTRIES = 700;
 const DEFAULT_TILE_TTL = 7 * 24 * 60 * 60 * 1000;

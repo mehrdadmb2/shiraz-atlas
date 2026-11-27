@@ -150,3 +150,48 @@ body:before{z-index:0;opacity:.72;animation:atlasBackdropShift 26s ease-in-out i
 .place-actions{flex-wrap:wrap}
 .place-actions button{flex:0 1 auto}
 @media(max-width:700px){.duplicate-toolbar{align-items:stretch;flex-direction:column}.duplicate-toolbar .button{width:100%}#access-filter{max-width:none;flex:1;min-width:100%}.access-mode-options{display:grid;grid-template-columns:1fr 1fr}.duplicate-member{align-items:flex-start;flex-direction:column}.duplicate-group-heading{align-items:flex-start;flex-direction:column}}
+
+
+/* v1.4.0 — cyberpunk topographic atmosphere */
+body{isolation:isolate}
+body::before{content:"";position:fixed;inset:-4%;z-index:-3;pointer-events:none;background:
+linear-gradient(180deg,rgba(3,8,20,.58),rgba(4,12,27,.48) 42%,rgba(3,8,20,.62)),
+url("../assets/cyber-topography.webp") center 48%/cover no-repeat;opacity:.58;transform:scale(1.04);animation:atlasTerrainDrift 72s ease-in-out infinite alternate;will-change:transform,background-position}
+body::after{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;background:
+linear-gradient(115deg,transparent 0 34%,rgba(37,203,255,.035) 48%,transparent 61%),
+repeating-linear-gradient(0deg,transparent 0 5px,rgba(89,201,238,.012) 6px,transparent 7px);
+background-size:180% 100%,100% 8px;mix-blend-mode:screen;opacity:.7;animation:atlasScanDrift 34s linear infinite}
+@keyframes atlasTerrainDrift{0%{transform:scale(1.04) translate3d(0,0,0);background-position:center 48%}50%{transform:scale(1.09) translate3d(-1.2%,.5%,0);background-position:52% 51%}100%{transform:scale(1.06) translate3d(1%,-.6%,0);background-position:48% 46%}}
+@keyframes atlasScanDrift{0%{background-position:0 0,0 0}100%{background-position:180% 0,0 8px}}
+body.light-theme::before{opacity:.16;filter:saturate(.85) brightness(1.55)}
+body.light-theme::after{opacity:.22;mix-blend-mode:multiply}
+.glass{box-shadow:0 22px 72px rgba(0,0,0,.38),inset 0 1px 0 rgba(169,223,255,.055)}
+.place-card-clickable{cursor:pointer;transition:transform .24s ease,border-color .24s ease,box-shadow .24s ease}
+.place-card-clickable:hover{transform:translateY(-4px);border-color:rgba(71,211,255,.38);box-shadow:0 24px 66px rgba(0,0,0,.42),0 0 24px rgba(42,188,255,.08)}
+.place-card-clickable:focus-visible{outline:2px solid var(--cyan);outline-offset:4px}
+.name-suggest-button{justify-self:start;margin-top:5px}
+.field-hint{display:block;color:var(--muted-2);font-size:11px;line-height:1.8;margin-top:5px}
+.place-detail-modal{max-height:min(90vh,980px);overflow:auto}
+.place-detail-hero{display:flex;align-items:center;gap:16px;padding:8px 0 22px;border-bottom:1px solid var(--panel-border);margin-bottom:18px}
+.place-detail-emblem{width:64px;height:64px;display:grid;place-items:center;border-radius:20px;background:linear-gradient(145deg,rgba(44,199,255,.18),rgba(201,72,255,.14));border:1px solid rgba(80,205,255,.28);font-size:30px;box-shadow:0 0 34px rgba(38,187,255,.12)}
+.place-detail-heading h2{margin:5px 0;font-size:clamp(21px,3vw,30px)}
+.place-detail-heading p{margin:0;color:var(--muted);font-size:13px}
+.place-detail-content{display:grid;gap:16px}
+.detail-image-wrap{height:220px;overflow:hidden;border-radius:18px;border:1px solid var(--panel-border);background:var(--panel-strong)}
+.detail-image-wrap img{width:100%;height:100%;object-fit:cover}
+.detail-field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.detail-field{min-width:0;padding:13px 14px;border-radius:14px;background:rgba(4,17,31,.42);border:1px solid var(--panel-border);display:flex;flex-direction:column;gap:7px}
+body.light-theme .detail-field{background:rgba(255,255,255,.58)}
+.detail-field>span{font-size:11px;color:var(--muted)}
+.detail-field>strong{font-size:13px;font-weight:600;line-height:1.9;overflow-wrap:anywhere}
+.detail-field a{color:var(--cyan);text-decoration:underline;text-underline-offset:3px}
+.detail-field code{font-family:ui-monospace,Consolas,monospace;direction:ltr;display:inline-block}
+.detail-field-wide{grid-column:1/-1}
+.detail-empty{font-style:normal;color:var(--muted-2);font-weight:400}
+.detail-chip-row{display:flex;gap:7px;flex-wrap:wrap}
+.detail-chip{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;background:rgba(57,194,239,.11);border:1px solid rgba(57,194,239,.18);font-size:11px}
+.place-detail-actions{position:sticky;bottom:-1px;background:var(--panel-strong);padding:12px;border-radius:16px;margin-top:18px;z-index:2;flex-wrap:wrap}
+@media(max-width:650px){body::before{background-position:center center;opacity:.35}.detail-field-grid{grid-template-columns:1fr}.detail-field-wide{grid-column:auto}.place-detail-hero{align-items:flex-start}.place-detail-emblem{width:52px;height:52px;flex-shrink:0}.place-detail-actions{display:grid;grid-template-columns:1fr 1fr}.place-detail-actions .button-primary{grid-column:1/-1}}
+@media(prefers-reduced-motion:reduce){body::before,body::after{animation:none!important}.place-card-clickable{transition:none}}
+
+.place-detail-trigger{border:1px solid rgba(71,211,255,.2);background:rgba(48,177,221,.08);color:var(--cyan);border-radius:999px;padding:5px 9px;font-size:10px;font-weight:700;white-space:nowrap;transition:background .2s ease,border-color .2s ease}.place-detail-trigger:hover{background:rgba(48,177,221,.16);border-color:rgba(71,211,255,.45)}

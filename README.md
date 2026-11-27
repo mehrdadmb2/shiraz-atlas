@@ -10,7 +10,7 @@
     <a href="https://shiraz-atlas.game-developer-mb.workers.dev/api/health"><img src="https://img.shields.io/website?url=https%3A%2F%2Fshiraz-atlas.game-developer-mb.workers.dev%2Fapi%2Fhealth&label=API%20health&style=for-the-badge" alt="API health"></a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/Version-1.3.0-8b7cff?style=flat-square">
+    <img src="https://img.shields.io/badge/Version-1.4.0-8b7cff?style=flat-square">
     <img src="https://img.shields.io/badge/Frontend-GitHub%20Pages-181717?style=flat-square&logo=github">
     <img src="https://img.shields.io/badge/API-Cloudflare%20Workers-F38020?style=flat-square&logo=cloudflare">
     <img src="https://img.shields.io/badge/Map-Leaflet%20%2B%20OSM-72b85a?style=flat-square">
@@ -163,7 +163,7 @@ The Service Worker stores the app shell, Leaflet runtime, the public map snapsho
 The browser first asks the Cloudflare Worker for current conditions and a three-day forecast. If the Worker path fails, it makes a direct Open-Meteo request. The last successful response is retained locally for up to 12 hours, with a visible stale-data indicator. The card changes its atmosphere according to weather code, day/night, temperature, the Shiraz season and the local weekend.
 
 
-## v1.3.0 · Duplicate cleanup & travel access
+## v1.4.0 · Duplicate cleanup & travel access
 
 - Admin duplicate scan with 25m / 35m / 50m thresholds; merge keeps the best-populated canonical record and preserves visit history.
 - Create/move duplicate warning with explicit confirmation.
@@ -171,8 +171,23 @@ The browser first asks the Cloudflare Worker for current conditions and a three-
 - Telegram inline edit flow: tap a field and send only its new value.
 
 
-## v1.3.0 — Duplicate cleanup & travel access
+## v1.4.0 — Duplicate cleanup & travel access
 
 The admin site now includes **⟲ بررسی تکراری‌ها** with 25m / 35m / 50m thresholds. A merge keeps one canonical place, combines missing metadata and access tags, reassigns the duplicate's visit history, and removes the duplicate place records. New places and coordinate changes that overlap another saved place are blocked with a proximity warning until explicitly confirmed.
 
 Each place can be labeled for **walking, car, motorcycle, public transport, and bicycle** access. Admins can filter the place list by these modes. Telegram admins use `/places` → place → **ویرایش جزئیات** → field button → send the value; the Worker stores a 15-minute per-admin edit session in the private data file.
+
+
+## v1.4.0 — Place Profiles, Safer Cleanup & Cyberpunk Terrain
+
+- Every place card opens a full place profile with all fields, including explicit “not set” values.
+- Admins can edit the complete profile and save through the Worker; the GitHub token remains server-side.
+- `/duplicates` in Telegram and the admin inline menu scan the full place collection. Each merge requires a second explicit confirmation.
+- Duplicate groups use complete-link distance checks; the Worker independently validates every merge and remaps visit history.
+- Blank/generic new place names receive a cautious OpenStreetMap reverse-name suggestion only when a named POI is returned within 65 metres. Uncertain pins remain “مکان بدون نام”.
+- New cyberpunk topographic background artwork lives in `assets/cyber-topography.webp`.
+- Telegram place summaries use structured HTML, blockquotes, and monospace coordinates / IDs.
+
+### GitHub token permissions
+
+Create a Fine-grained PAT scoped only to the private `shiraz-atlas-data` repository, with **Contents: Read and write** and Metadata read-only. Store it as the Cloudflare Worker secret `GITHUB_TOKEN`. Never place it in `js/config.js`, GitHub Pages, HTML, or a public repository. The website writes through the authenticated Worker API only.

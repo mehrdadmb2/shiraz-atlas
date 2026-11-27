@@ -24,7 +24,6 @@
   <script defer src="js/app.js"></script>
 </head>
 <body>
-  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div><div class="ambient-grid"></div>
   <div id="toast-root" class="toast-root" aria-live="polite"></div>
   <div id="loading-screen" class="loading-screen">
     <img src="assets/atlas-mark.svg" alt="Shiraz Atlas" class="loader-mark">
@@ -186,7 +185,7 @@
     <div class="modal glass modal-wide"><button class="modal-close" data-close="place-modal" aria-label="بستن">×</button><div class="modal-heading"><div><span class="mini-kicker">ATLAS COLLECTION</span><h2 id="place-modal-title">افزودن مکان جدید</h2><p>اطلاعات مقصد را ثبت کن؛ هر زمان خواستی قابل ویرایش است.</p></div><span class="modal-icon">⌖</span></div>
       <form id="place-form" class="form-grid">
         <input type="hidden" id="place-id">
-        <label class="field-label span-2">نام مکان *<input id="place-name" required maxlength="120" placeholder="مثلاً باغ ارم"></label>
+        <label class="field-label span-2">نام مکان<input id="place-name" maxlength="120" placeholder="مثلاً باغ ارم"><button type="button" class="button button-quiet name-suggest-button" id="suggest-place-name">✦ تشخیص نام از روی مختصات</button><small class="field-hint">اگر نام خالی باشد، سیستم در صورت یافتن عارضهٔ معتبر نزدیک، نام پیشنهادی نقشه را ثبت می‌کند.</small></label>
         <label class="field-label">دسته‌بندی<select id="place-category"></select></label>
         <label class="field-label">وضعیت مکان<select id="place-status"><option value="active">فعال / قابل مراجعه</option><option value="planned">در لیست بازدید</option><option value="closed">تعطیل یا نامشخص</option></select></label>
         <label class="field-label">عرض جغرافیایی (Latitude) *<input id="place-lat" required inputmode="decimal" placeholder="29.6225" dir="ltr"></label>
@@ -219,8 +218,25 @@
   <div class="modal-backdrop hidden" id="duplicate-manager-modal" role="dialog" aria-modal="true" aria-labelledby="duplicate-manager-title">
     <div class="modal glass modal-wide"><button class="modal-close" data-close="duplicate-manager-modal" aria-label="بستن">×</button>
       <div class="modal-heading"><div><span class="mini-kicker">DATA CLEANUP / SPATIAL MATCHING</span><h2 id="duplicate-manager-title">بررسی مکان‌های تکراری</h2><p>مکان‌های نزدیک‌تر از آستانه انتخابی بررسی می‌شوند. در ادغام، یک مکان اصلی می‌ماند و سابقهٔ بازدیدها حفظ می‌شود.</p></div><span class="modal-icon">⟲</span></div>
-      <div class="duplicate-toolbar"><label class="field-label">آستانه فاصله<select id="duplicate-threshold"><option value="25">۲۵ متر (سخت‌گیرانه)</option><option value="35" selected>۳۵ متر (پیشنهادی)</option><option value="50">۵۰ متر (حساس‌تر)</option></select></label><button class="button button-primary" id="duplicate-scan-button">⌕ اسکن دوباره</button></div>
+      <div class="duplicate-toolbar"><label class="field-label">آستانه فاصله<select id="duplicate-threshold"><option value="25">۲۵ متر (سخت‌گیرانه)</option><option value="35" selected>۳۵ متر (پیشنهادی)</option><option value="50">۵۰ متر (حساس‌تر)</option></select></label><div class="duplicate-toolbar-actions"><button class="button button-primary" id="duplicate-scan-button">⌕ اسکن دوباره</button><button class="button button-outline hidden" id="duplicate-merge-all">✓ ادغام همه گروه‌ها</button></div></div>
       <div id="duplicate-summary" class="duplicate-summary">برای شروع، دکمه اسکن را بزن.</div><div id="duplicate-groups" class="duplicate-groups"></div>
+    </div>
+  </div>
+
+  <!-- Place detail sheet -->
+  <div class="modal-backdrop hidden" id="place-detail-modal" role="dialog" aria-modal="true" aria-labelledby="place-detail-title">
+    <div class="modal glass modal-wide place-detail-modal">
+      <button class="modal-close" data-close="place-detail-modal" aria-label="بستن">×</button>
+      <div class="place-detail-hero">
+        <div class="place-detail-emblem" id="place-detail-emblem">⌖</div>
+        <div class="place-detail-heading"><span class="mini-kicker">SHIRAZ ATLAS / PLACE PROFILE</span><h2 id="place-detail-title">جزئیات مکان</h2><p id="place-detail-subtitle">نمایهٔ کامل مقصد</p></div>
+      </div>
+      <div id="place-detail-content" class="place-detail-content"></div>
+      <div class="form-actions place-detail-actions">
+        <button class="button button-quiet" id="place-detail-map">⌖ نمایش روی نقشه</button>
+        <button class="button button-outline" id="place-detail-route">↗ مسیریابی</button>
+        <button class="button button-primary admin-only hidden" id="place-detail-edit">✎ ویرایش تمام جزئیات</button>
+      </div>
     </div>
   </div>
 

@@ -1,9 +1,10 @@
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const MAX_DATA_BYTES = 850 * 1024; // keep margin below GitHub Contents API's 1 MiB response boundary
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const loginAttempts = new Map();
 const routeCache = new Map();
+let lastNominatimRequestAt = 0;
 
 const DEFAULT_CATEGORIES = [
   { id: 'cafe', name: 'کافه', icon: '☕', color: '#69d9c2' },
@@ -121,7 +122,7 @@ function placeCompleteness(place, visitCount = 0) {
   const fields = ['address','description','imageUrl','website','phone','bestTime','accessNotes'];
   const tags = Array.isArray(place?.tags) ? place.tags.length : 0;
   const accessModes = Array.isArray(place?.accessModes) ? place.accessModes.length : 0;
-  return fields.filter(key => String(place?.[key] || '').trim()).length + tags * 0.25 + accessModes * 0.5 + visitCount * 2;
+  return fields.filter(key => String(place?.[key] || '').trim()).length + tags * 0.25 + accessModes * 0.5 + visitCount * 2 + (needsAutoName(place?.name) ? 0 : 3);
 }
 function nearbyPlaces(data, point, threshold = 35, excludeId = '') {
   return (data.places || []).filter(place => place?.id !== excludeId && hasValidCoordinates(place))
@@ -146,22 +147,41 @@ function findDuplicateGroups(data, threshold = 35) {
   const places = (data.places || []).filter(hasValidCoordinates);
   const visitCounts = new Map();
   for (const visit of data.visits || []) visitCounts.set(visit.placeId, (visitCounts.get(visit.placeId) || 0) + 1);
-  const ranked = [...places].sort((a, b) => placeCompleteness(b, visitCounts.get(b.id) || 0) - placeCompleteness(a, visitCounts.get(a.id) || 0));
-  const assigned = new Set(), groups = [];
-  for (const anchor of ranked) {
-    if (assigned.has(anchor.id)) continue;
-    const matches = ranked.filter(candidate => candidate.id !== anchor.id && !assigned.has(candidate.id))
-      .map(candidate => ({ place: candidate, exactDistance: haversine(anchor, candidate) }))
-      .filter(item => item.exactDistance <= threshold)
-      .sort((a, b) => a.exactDistance - b.exactDistance);
-    if (!matches.length) continue;
-    assigned.add(anchor.id); matches.forEach(item => assigned.add(item.place.id));
-    groups.push({ keep: { id: anchor.id, name: anchor.name, lat: anchor.lat, lng: anchor.lng }, duplicates: matches.map(item => ({ id: item.place.id, name: item.place.name, distanceMeters: Math.round(item.exactDistance) })), threshold });
+  const ranked = [...places].sort((a, b) =>
+    placeCompleteness(b, visitCounts.get(b.id) || 0) - placeCompleteness(a, visitCounts.get(a.id) || 0) ||
+    String(a.name || '').localeCompare(String(b.name || ''), 'fa')
+  );
+  // Complete-link clusters: every member must be within threshold of every other
+  // member. This avoids unsafe chain-merges where A~B and B~C but A is far from C.
+  const clusters = [];
+  for (const place of ranked) {
+    let best = null, bestDistance = Infinity;
+    for (const cluster of clusters) {
+      const distances = cluster.map(member => haversine(place, member));
+      if (distances.every(distance => distance <= threshold)) {
+        const score = Math.max(...distances);
+        if (score < bestDistance) { best = cluster; bestDistance = score; }
+      }
+    }
+    if (best) best.push(place);
+    else clusters.push([place]);
   }
-  return groups;
+  return clusters.filter(cluster => cluster.length > 1).map(cluster => {
+    const keep = cluster[0];
+    return {
+      keep: { id: keep.id, name: keep.name || 'مکان بدون نام', lat: Number(keep.lat), lng: Number(keep.lng) },
+      duplicates: cluster.slice(1).map(place => ({
+        id: place.id, name: place.name || 'مکان بدون نام',
+        distanceMeters: Math.round(haversine(keep, place))
+      })),
+      threshold,
+      memberCount: cluster.length
+    };
+  });
 }
 function mergePlaceData(keep, duplicate) {
-  for (const key of ['address','description','bestTime','phone','website','imageUrl','accessNotes']) {
+  if (needsAutoName(keep.name) && !needsAutoName(duplicate.name)) { const previousName = keep.name; keep.name = duplicate.name; if (previousName) keep.alternateNames = [...new Set([...(keep.alternateNames || []), previousName])].slice(0, 20); }
+  for (const key of ['address','description','bestTime','phone','website','imageUrl','accessNotes','source','nameSource','nameConfidence']) {
     if (!String(keep[key] || '').trim() && String(duplicate[key] || '').trim()) keep[key] = duplicate[key];
   }
   if (keep.entryFee == null && duplicate.entryFee != null) keep.entryFee = duplicate.entryFee;
@@ -173,7 +193,7 @@ function mergePlaceData(keep, duplicate) {
   keep.tags = [...new Set([...keepTags, ...duplicateTags].map(x => safeText(x, 40)).filter(Boolean))].slice(0, 20);
   const keepAlternateNames = Array.isArray(keep.alternateNames) ? keep.alternateNames : [];
   const duplicateAlternateNames = Array.isArray(duplicate.alternateNames) ? duplicate.alternateNames : [];
-  if (duplicate.name && duplicate.name !== keep.name) keep.alternateNames = [...new Set([...keepAlternateNames, duplicate.name, ...duplicateAlternateNames])].slice(0, 20);
+  keep.alternateNames = [...new Set([...keepAlternateNames, ...(duplicate.name && duplicate.name !== keep.name ? [duplicate.name] : []), ...duplicateAlternateNames].map(x => safeText(x, 120)).filter(Boolean))].slice(0, 20);
   keep.accessModes = normalizeAccessModes([...(Array.isArray(keep.accessModes) ? keep.accessModes : []), ...(Array.isArray(duplicate.accessModes) ? duplicate.accessModes : [])]);
   keep.visibility = (keep.visibility === 'private' || duplicate.visibility === 'private') ? 'private' : 'public';
   if (duplicate.notes) keep.notes = [keep.notes, `ادغام‌شده از ${duplicate.name}: ${duplicate.notes}`].filter(Boolean).join('\n').slice(0, 1200);
@@ -381,16 +401,16 @@ function mutateAtlas(data, action, payload = {}) {
   const now = new Date().toISOString();
   const categories = data.categories;
   if (action === 'place.create') {
-    const name = safeText(payload.name, 120), lat = number(payload.lat, -90, 90), lng = number(payload.lng, -180, 180);
+    const name = safeText(payload.name, 120) || 'مکان بدون نام', lat = number(payload.lat, -90, 90), lng = number(payload.lng, -180, 180);
     if (!name || lat === null || lng === null) throw new Error('نام و مختصات معتبر برای مکان ضروری است.');
     assertNoNearbyDuplicate(data, { lat, lng }, payload);
     const place = {
       id: makeId('pl'), name, lat, lng, categoryId: safeText(payload.categoryId, 80) || 'hidden', address: safeText(payload.address, 250),
-      description: safeText(payload.description, 1200), tags: Array.isArray(payload.tags) ? payload.tags.map(t => safeText(t, 40)).filter(Boolean).slice(0, 20) : [],
+      description: safeText(payload.description, 1200), tags: Array.isArray(payload.tags) ? payload.tags.map(t => safeText(t, 40)).filter(Boolean).slice(0, 20) : [], alternateNames: Array.isArray(payload.alternateNames) ? [...new Set(payload.alternateNames.map(x => safeText(x, 120)).filter(Boolean))].slice(0, 20) : [],
       entryFee: number(payload.entryFee, 0, 100000000000) ?? null, estimatedCost: number(payload.estimatedCost, 0, 100000000000) ?? null,
       rating: number(payload.rating, 0, 5) ?? null, bestTime: safeText(payload.bestTime, 120), phone: safeText(payload.phone, 60), website: safeText(payload.website, 500),
       imageUrl: safeText(payload.imageUrl, 1000), notes: safeText(payload.notes, 1200), accessModes: normalizeAccessModes(payload.accessModes), accessNotes: safeText(payload.accessNotes, 500), status: ['active','planned','closed'].includes(payload.status) ? payload.status : 'active',
-      visibility: payload.visibility === 'private' ? 'private' : 'public', createdAt: now, updatedAt: now, source: safeText(payload.source || 'website', 40)
+      visibility: payload.visibility === 'private' ? 'private' : 'public', createdAt: now, updatedAt: now, source: safeText(payload.source || 'website', 40), nameSource: safeText(payload.nameSource || 'manual', 40), nameConfidence: safeText(payload.nameConfidence || '', 30)
     };
     if (!categories.some(c => c.id === place.categoryId)) place.categoryId = categories[0]?.id || 'hidden';
     for (const tag of place.tags) if (!data.tags.some(t => t.toLowerCase() === tag.toLowerCase())) data.tags.push(tag);
@@ -399,12 +419,13 @@ function mutateAtlas(data, action, payload = {}) {
   if (action === 'place.update') {
     const place = data.places.find(p => p.id === payload.id); if (!place) throw new Error('مکان موردنظر پیدا نشد.');
     const previousCoordinates = { lat: Number(place.lat), lng: Number(place.lng) };
-    const fields = ['name','categoryId','address','description','bestTime','phone','website','imageUrl','notes','status','visibility','accessNotes'];
+    const fields = ['name','categoryId','address','description','bestTime','phone','website','imageUrl','notes','status','visibility','accessNotes','source'];
     for (const key of fields) if (Object.prototype.hasOwnProperty.call(payload, key)) place[key] = safeText(payload[key], key === 'description' || key === 'notes' ? 1200 : key === 'website' || key === 'imageUrl' ? 1000 : 250);
     if (Object.prototype.hasOwnProperty.call(payload, 'lat')) { const v = number(payload.lat, -90, 90); if (v === null) throw new Error('عرض جغرافیایی معتبر نیست.'); place.lat = v; }
     if (Object.prototype.hasOwnProperty.call(payload, 'lng')) { const v = number(payload.lng, -180, 180); if (v === null) throw new Error('طول جغرافیایی معتبر نیست.'); place.lng = v; }
     for (const key of ['entryFee','estimatedCost','rating']) if (Object.prototype.hasOwnProperty.call(payload, key)) place[key] = payload[key] === '' || payload[key] === null ? null : number(payload[key], 0, key === 'rating' ? 5 : 100000000000);
     if (Object.prototype.hasOwnProperty.call(payload, 'accessModes')) place.accessModes = normalizeAccessModes(payload.accessModes);
+    if (Object.prototype.hasOwnProperty.call(payload, 'alternateNames')) place.alternateNames = Array.isArray(payload.alternateNames) ? [...new Set(payload.alternateNames.map(x => safeText(x, 120)).filter(Boolean))].slice(0, 20) : [];
     if (Object.prototype.hasOwnProperty.call(payload, 'tags')) {
       place.tags = Array.isArray(payload.tags) ? payload.tags.map(t => safeText(t, 40)).filter(Boolean).slice(0, 20) : [];
       for (const tag of place.tags) if (!data.tags.some(t => t.toLowerCase() === tag.toLowerCase())) data.tags.push(tag);
@@ -545,13 +566,72 @@ function mutateAtlas(data, action, payload = {}) {
   throw new Error('نوع عملیات پشتیبانی نمی‌شود.');
 }
 
+async function reversePlaceName(env, lat, lng) {
+  const latitude = number(lat, -90, 90), longitude = number(lng, -180, 180);
+  if (latitude === null || longitude === null) return null;
+  const key = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude.toFixed(5)}&lon=${longitude.toFixed(5)}&zoom=18&addressdetails=1&extratags=1&namedetails=1`;
+  try {
+    const cache = caches.default;
+    const cacheRequest = new Request(key, { headers: { 'Accept': 'application/json' } });
+    let response = await cache.match(cacheRequest);
+    if (!response) {
+      if (Date.now() - lastNominatimRequestAt < 1100) return null;
+      lastNominatimRequestAt = Date.now();
+      response = await fetch(key, {
+        headers: { 'Accept': 'application/json', 'User-Agent': 'ShirazAtlas/1.4 (+https://github.com/mehrdadmb2/shiraz-atlas)' },
+        signal: AbortSignal.timeout(4500)
+      });
+      if (!response.ok) return null;
+      const copy = new Response(await response.clone().text(), {
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=43200' }
+      });
+      try { await cache.put(cacheRequest, copy); } catch {}
+    }
+    const result = await response.json();
+    const name = safeText(result?.namedetails?.['name:fa'] || result?.namedetails?.name || result?.name, 120);
+    if (!name) return null;
+    const category = String(result.category || '').toLowerCase();
+    const type = String(result.type || '').toLowerCase();
+    const addressType = String(result.addresstype || '').toLowerCase();
+    const eligible = ['tourism','historic','leisure','amenity','shop','natural'].includes(category) ||
+      /attraction|museum|monument|garden|park|castle|square|restaurant|cafe|market|place_of_worship|water/.test(`${type} ${addressType}`);
+    if (!eligible) return null;
+    const featureLat = Number(result.lat), featureLng = Number(result.lon);
+    if (!Number.isFinite(featureLat) || !Number.isFinite(featureLng)) return null;
+    const distanceMeters = haversine({ lat: latitude, lng: longitude }, { lat: featureLat, lng: featureLng });
+    // Never name a pin after a distant neighbour. Reverse-geocoding is a suggestion, not proof.
+    if (distanceMeters > 65) return null;
+    const address = safeText(result.display_name, 250);
+    return { name, address, distanceMeters: Math.round(distanceMeters), source: 'openstreetmap-reverse', confidence: distanceMeters <= 25 ? 'high' : 'medium' };
+  } catch (error) {
+    console.warn(JSON.stringify({ level: 'warn', event: 'reverse_geocode_failed', message: error?.message || String(error) }));
+    return null;
+  }
+}
+function needsAutoName(name) {
+  const value = String(name || '').trim();
+  return !value || /^(?:مکان\s*(?:ذخیره.?شده|ثبت.?شده|بدون.?نام|جدید)|unknown|unnamed|place)(?:\s|$)/i.test(value);
+}
+async function preparePlacePayload(env, action, payload) {
+  if (action !== 'place.create' || !needsAutoName(payload?.name)) return payload;
+  const suggestion = await reversePlaceName(env, payload.lat, payload.lng);
+  if (suggestion) return {
+    ...payload, name: suggestion.name,
+    address: payload.address || suggestion.address,
+    nameSource: suggestion.source, nameConfidence: suggestion.confidence,
+    description: payload.description || `نام پیشنهادی از OpenStreetMap؛ فاصلهٔ نقطهٔ ثبت‌شده تا مرکز عارضه حدود ${suggestion.distanceMeters} متر است.`
+  };
+  return { ...payload, name: 'مکان بدون نام', nameSource: 'unresolved', nameConfidence: 'none' };
+}
+
 async function handleMutation(request, env) {
   if (!originAllowed(request, env)) return json({ error: 'Origin مجاز نیست.' }, 403);
   if (!await requireAdmin(request, env)) return json({ error: 'نشست ادمین معتبر نیست؛ دوباره وارد شو.' }, 401);
   const body = await request.json().catch(() => null);
   if (!body || typeof body.action !== 'string' || !body.payload || typeof body.payload !== 'object') return json({ error: 'درخواست تغییر داده معتبر نیست.' }, 400);
   try {
-    const saved = await updateData(env, data => mutateAtlas(data, body.action, body.payload), body.action);
+    const preparedPayload = await preparePlacePayload(env, body.action, body.payload);
+    const saved = await updateData(env, data => mutateAtlas(data, body.action, preparedPayload), body.action);
     return json({ ok: true, result: saved.result, updatedAt: saved.data.updatedAt });
   } catch (error) { return json({ error: error.message || 'ذخیره‌سازی انجام نشد.', ...(error.details || {}) }, error.status === 403 ? 502 : (error.status || 400)); }
 }
@@ -683,7 +763,7 @@ function botKeyboard(admin,owner){
  [{text:'🗂 دسته‌بندی‌ها',callback_data:'menu:categories'},{text:'🌤 آب‌وهوا',callback_data:'menu:weather'}],
  [{text:'📌 نزدیک من',callback_data:'menu:near'},{text:'🌐 نقشه اطلس',url:'https://mehrdadmb2.github.io/shiraz-atlas/'}]
  ];
- if(admin)rows.push([{text:'➕ ثبت مکان',callback_data:'admin:add'},{text:'🛠 پنل مدیریت',callback_data:'admin:panel'}],[{text:'🧪 تست سلامت پروژه',callback_data:'admin:test'}]);
+ if(admin)rows.push([{text:'➕ ثبت مکان',callback_data:'admin:add'},{text:'🛠 پنل مدیریت',callback_data:'admin:panel'}],[{text:'🔎 بررسی مکان‌های تکراری',callback_data:'admin:duplicates'},{text:'🧪 تست سلامت پروژه',callback_data:'admin:test'}]);
  if(owner)rows.push([{text:'👥 مدیریت ادمین‌ها',callback_data:'owner:admins'}]);
  return{inline_keyboard:rows};
 }
@@ -691,30 +771,43 @@ function tgEscape(value) { return String(value ?? '').replace(/[&<>]/g, c => ({ 
 async function tgMessage(env, chatId, message, options = {}) {
   return telegramCall(env, 'sendMessage', { chat_id: chatId, text: message, parse_mode: 'HTML', disable_web_page_preview: true, ...options });
 }
-function formatPlace(place, data) {
+function formatPlace(place, data, includePrivate = false) {
   const category = data.categories.find(c => c.id === place.categoryId);
-  const parts = [
-    `${category?.icon || '📍'} <b>${tgEscape(place.name)}</b>`,
-    category ? `🗂 ${tgEscape(category.name)}` : '',
-    place.address ? `📌 ${tgEscape(place.address)}` : '',
-    place.entryFee != null ? `🎟 ورودی: ${Number(place.entryFee).toLocaleString('en-US')} تومان` : '',
-    place.estimatedCost != null ? `💰 هزینه تقریبی: ${Number(place.estimatedCost).toLocaleString('en-US')} تومان` : '',
-    place.rating != null ? `⭐ امتیاز شخصی: ${place.rating}/5` : '',
-    place.accessModes?.length ? `🚶 دسترسی: ${place.accessModes.map(mode => ACCESS_MODE_LABELS[mode]).filter(Boolean).join('، ')}` : '',
-    place.accessNotes ? `🛣 توضیح دسترسی: ${tgEscape(place.accessNotes)}` : '',
-    place.description ? `\n${tgEscape(place.description)}` : '',
+  const missing = '<i>ثبت نشده</i>';
+  const access = place.accessModes?.length ? place.accessModes.map(mode => ACCESS_MODE_LABELS[mode]).filter(Boolean).join('، ') : missing;
+  const lines = [
+    `${category?.icon || '📍'} <b>${tgEscape(place.name || 'مکان بدون نام')}</b>`,
+    `━━━━━━━━━━━━━━━━━━`,
+    `🗂 <b>دسته‌بندی:</b> ${tgEscape(category?.name || 'بدون دسته‌بندی')}`,
+    `📌 <b>وضعیت:</b> ${tgEscape(({active:'فعال',planned:'در برنامه بازدید',closed:'تعطیل / نامشخص'})[place.status] || 'نامشخص')}`,
+    `📍 <b>آدرس:</b> ${place.address ? tgEscape(place.address) : missing}`,
+    `🧭 <b>مختصات:</b> <code>${Number(place.lat).toFixed(6)}, ${Number(place.lng).toFixed(6)}</code>`,
+    `🚶 <b>دسترسی:</b> ${access}`,
+    `🎟 <b>ورودی:</b> ${place.entryFee != null ? `${Number(place.entryFee).toLocaleString('en-US')} تومان` : missing}`,
+    `💰 <b>هزینه تقریبی:</b> ${place.estimatedCost != null ? `${Number(place.estimatedCost).toLocaleString('en-US')} تومان` : missing}`,
+    `⭐ <b>امتیاز شخصی:</b> ${place.rating != null ? `${place.rating}/5` : missing}`,
+    `🕒 <b>بهترین زمان:</b> ${place.bestTime ? tgEscape(place.bestTime) : missing}`,
+    `🏷 <b>برچسب‌ها:</b> ${place.tags?.length ? tgEscape(place.tags.join('، ')) : missing}`,
+    `📝 <b>توضیحات:</b>`,
+    place.description ? `<blockquote>${tgEscape(place.description)}</blockquote>` : missing,
+    `🛣 <b>توضیح دسترسی:</b> ${place.accessNotes ? tgEscape(place.accessNotes) : missing}`,
+    `☎️ <b>تماس:</b> ${place.phone ? `<code>${tgEscape(place.phone)}</code>` : missing}`,
+    `🌐 <b>وب‌سایت:</b> ${place.website ? tgEscape(place.website) : missing}`,
+    place.alternateNames?.length ? `🔤 <b>نام‌های دیگر:</b> ${tgEscape(place.alternateNames.join('، '))}` : '',
     `\n🧭 <a href="https://www.google.com/maps/dir/?api=1&amp;destination=${place.lat},${place.lng}">مسیریابی در Google Maps</a>`,
-    `🆔 <code>${tgEscape(place.id)}</code>`
+    `<code>ID: ${tgEscape(place.id)}</code>`
   ].filter(Boolean);
-  return parts.join('\n');
+  if (includePrivate && place.notes) lines.splice(lines.length - 2, 0, `🔒 <b>یادداشت خصوصی:</b>\n<blockquote>${tgEscape(place.notes)}</blockquote>`);
+  return lines.join('\n');
 }
 async function sendPlace(env, chatId, place, data, admin = false) {
   const rows = [[{ text: '🧭 مسیریابی', url: `https://www.google.com/maps/dir/?api=1&destination=${place.lat},${place.lng}` }, { text: '🗺️ نقشه اطلس', url: `${env.PUBLIC_SITE_URL || 'https://mehrdadmb2.github.io/shiraz-atlas/'}?place=${encodeURIComponent(place.id)}` }]];
   if (admin) rows.push([{ text: '🛠 ویرایش جزئیات این مکان', callback_data: `peditmenu:${place.id}` }]);
-  await tgMessage(env, chatId, formatPlace(place, data), { reply_markup: { inline_keyboard: rows } });
+  await tgMessage(env, chatId, formatPlace(place, data, admin), { reply_markup: { inline_keyboard: rows } });
   await telegramCall(env, 'sendLocation', { chat_id: chatId, latitude: place.lat, longitude: place.lng });
 }
 async function adminMutation(env, action, payload, updateId) {
+  payload = await preparePlacePayload(env, action, payload);
   return updateData(env, data => {
     const id = Number(updateId || 0);
     const seen = data.meta.processedTelegramUpdateIds || [];
@@ -755,6 +848,12 @@ async function runDiagnostics(env){
  add('Telegram token',!!env.TELEGRAM_BOT_TOKEN,'Bot token configured');
  add('Webhook secret',!!env.TELEGRAM_WEBHOOK_SECRET,'Webhook secret configured');
  try{const repoRes=await fetch(`https://api.github.com/repos/${encodeURIComponent(env.GITHUB_OWNER||'mehrdadmb2')}/shiraz-atlas`,{headers:{'Accept':'application/vnd.github+json','User-Agent':'Shiraz-Atlas-Diagnostics'}});add('Public source repository',repoRes.ok,`GitHub API HTTP ${repoRes.status}`);}catch(e){add('Public source repository',false,e.message);}
+ try {
+  const metaRes=await githubRequest(env,'');
+  const meta=await metaRes.json().catch(()=>({}));
+  const canWrite=metaRes.ok&&(meta.permissions?.push===true||meta.permissions?.admin===true);
+  add('GitHub data write permission',canWrite,metaRes.ok?`push=${Boolean(meta.permissions?.push)} · admin=${Boolean(meta.permissions?.admin)}`:`GitHub API HTTP ${metaRes.status}`);
+ } catch(e) { add('GitHub data write permission',false,e.message); }
  if(env.PUBLIC_SITE_URL)try{const pageRes=await fetch(env.PUBLIC_SITE_URL,{headers:{'user-agent':'ShirazAtlas-Diagnostics/1.1'}});add('GitHub Pages website',pageRes.ok,`HTTP ${pageRes.status} · ${env.PUBLIC_SITE_URL}`);}catch(e){add('GitHub Pages website',false,e.message);}
 
  try{const{data,cfg}=await readData(env);add('Private data repository',true,`${cfg.owner}/${cfg.repo}/${cfg.path}`);add('Data integrity',Array.isArray(data.places)&&Array.isArray(data.routes)&&Array.isArray(data.visits),`places=${data.places.length}, routes=${data.routes.length}, visits=${data.visits.length}`);}
@@ -770,18 +869,41 @@ async function sendHome(env, chatId, fromId) {
 از دکمه‌های زیر استفاده کن؛ /help راهنمای کامل است.`, { reply_markup: botKeyboard(admin, isOwner(fromId, env)) });
 }
 function formatHelp(admin, owner = false) {
-  const lines = ['<b>🧭 راهنمای Shiraz Atlas</b>', '', '<b>🌍 دستورات عمومی</b>',
-    '/start — منوی اصلی و دکمه‌ها', '/help — راهنمای دستورات', '/myid — شناسه عددی تلگرام',
-    '/places — فهرست مکان‌ها', '/search عبارت — جست‌وجو', '/random [دسته/برچسب] — مقصد تصادفی',
-    '/near lat,lng — مکان‌های نزدیک', '/categories — دسته‌بندی‌ها', '/weather [lat,lng] — هواشناسی'];
-  if (admin) lines.push('', '<b>🔐 مدیریت</b>', '/add نام | lat,lng | دسته | ورودی | توضیحات',
-    'از /places مکان را انتخاب کن و با دکمه‌های ویرایش، هر فیلد را جداگانه تغییر بده.', '/delete ID — حذف با تأیید',
-    '/visit ID | good/normal/bad | یادداشت', '/route نام | کیفیت | lat,lng;lat,lng | یادداشت',
-    '/categoryadd نام | ایموجی', '/tagadd نام', '/stats — آمار خصوصی', '/test — تست سلامت پروژه',
-    'ارسال مستقیم مختصات یا Location برای ثبت سریع.');
-  if (owner) lines.push('', '<b>👑 مالک اصلی</b>', '/admins — فهرست ادمین‌ها',
-    '/adminadd 123456789 — افزودن ادمین', '/adminremove 123456789 — حذف ادمین');
-  if (!admin) lines.push('', 'برای مدیریت، دسترسی ادمین لازم است.');
+  const lines = [
+    '<b>🧭 راهنمای Shiraz Atlas</b>',
+    '<blockquote>اطلس شخصی کشف مکان‌ها، برنامه‌ریزی مقصدها و ثبت مسیرهای شیراز</blockquote>',
+    '<b>🌍 دستورات عمومی</b>',
+    '<code>/start</code> — منوی اصلی و دکمه‌ها',
+    '<code>/help</code> — راهنمای دستورات',
+    '<code>/myid</code> — شناسه عددی تلگرام',
+    '<code>/places</code> — فهرست مکان‌ها',
+    '<code>/search عبارت</code> — جست‌وجوی مکان',
+    '<code>/random</code> — مقصد تصادفی',
+    '<code>/near lat,lng</code> — مکان‌های نزدیک',
+    '<code>/categories</code> — دسته‌بندی‌ها',
+    '<code>/weather</code> — وضعیت آب‌وهوا'
+  ];
+  if (admin) lines.push(
+    '', '<b>🔐 ابزارهای مدیریت</b>',
+    '<code>/add نام | lat,lng | دسته | ورودی | توضیحات</code>',
+    '<blockquote>از /places یک مکان را باز کن و برای تغییر هر فیلد، دکمهٔ ویرایش همان فیلد را بزن؛ مقدار جدید را بدون دستور ارسال کن.</blockquote>',
+    '<code>/delete ID</code> — حذف با تأیید',
+    '<code>/visit ID | good/normal/bad | یادداشت</code>',
+    '<code>/route نام | کیفیت | lat,lng;lat,lng | یادداشت</code>',
+    '<code>/categoryadd نام | ایموجی</code>',
+    '<code>/tagadd نام</code>',
+    '<code>/stats</code> — آمار خصوصی',
+    '<code>/duplicates</code> — اسکن کامل و ادغام تکراری‌ها با تأیید',
+    '<code>/test</code> — تست سلامت پروژه',
+    '<blockquote>📍 برای ثبت سریع، موقعیت مکانی یا مختصات را مستقیماً ارسال کن.</blockquote>'
+  );
+  if (owner) lines.push(
+    '', '<b>👑 مدیریت مالک اصلی</b>',
+    '<code>/admins</code> — فهرست ادمین‌ها',
+    '<code>/adminadd 123456789</code> — افزودن ادمین',
+    '<code>/adminremove 123456789</code> — حذف ادمین'
+  );
+  if (!admin) lines.push('', '<blockquote>برای دسترسی به امکانات مدیریت، باید ادمین باشی.</blockquote>');
   lines.push('', '<a href="https://mehrdadmb2.github.io/shiraz-atlas/">🌐 باز کردن نقشه اطلس</a>');
   return lines.join('\n');
 }
@@ -790,7 +912,7 @@ async function getBotData(env) { return (await readData(env)).data; }
 const TELEGRAM_EDIT_FIELDS = {
   name: '✏️ نام مکان', categoryId: '🗂 دسته‌بندی', address: '📍 آدرس / محله', description: '📝 توضیحات',
   coordinates: '🧭 مختصات', entryFee: '🎟 هزینه ورودی', estimatedCost: '💰 هزینه تقریبی', rating: '⭐ امتیاز شخصی',
-  bestTime: '🕒 بهترین زمان', tags: '🏷 برچسب‌ها', accessModes: '🚶 نوع دسترسی', accessNotes: '🛣 توضیح مسیر دسترسی',
+  bestTime: '🕒 بهترین زمان', tags: '🏷 برچسب‌ها', alternateNames: '🔤 نام‌های جایگزین', source: '🧾 منبع ثبت', accessModes: '🚶 نوع دسترسی', accessNotes: '🛣 توضیح مسیر دسترسی',
   phone: '☎️ شماره تماس', website: '🌐 وب‌سایت', imageUrl: '🖼️ لینک تصویر', notes: '🔒 یادداشت خصوصی', status: '📌 وضعیت', visibility: '👁 نمایش عمومی / خصوصی'
 };
 function placeEditKeyboard(placeId) {
@@ -842,6 +964,8 @@ async function applyTelegramEditReply(message, update, env, session) {
       patch[session.field] = value; break;
     }
     case 'tags': patch.tags = clear ? [] : raw.split(/[,،؛;]/).map(x => x.trim()).filter(Boolean); break;
+    case 'alternateNames': patch.alternateNames = clear ? [] : raw.split(/[,،؛;]/).map(x => x.trim()).filter(Boolean); break;
+    case 'source': patch.source = clear ? '' : raw; break;
     case 'accessModes': try { patch.accessModes = clear ? [] : parseTelegramAccessModes(raw); } catch (error) { return tgMessage(env, chatId, tgEscape(error.message)); } break;
     case 'status': { const v = raw.toLowerCase(); patch.status = /تعطیل|بسته|غیرفعال|غیر\s*فعال|closed|inactive/.test(v) ? 'closed' : /برنامه|planned|بعدا|بعداً/.test(v) ? 'planned' : /فعال|active|open/.test(v) ? 'active' : ''; if (!patch.status) return tgMessage(env, chatId, 'وضعیت را با «فعال»، «در برنامه بازدید» یا «تعطیل / غیرفعال» مشخص کن.'); break; }
     case 'visibility': { const v = raw.toLowerCase(); patch.visibility = /خصوصی|private/.test(v) ? 'private' : /عمومی|public/.test(v) ? 'public' : ''; if (!patch.visibility) return tgMessage(env, chatId, 'برای نمایش عمومی بنویس «عمومی» و برای مخفی‌کردن بنویس «خصوصی».'); break; }
@@ -894,7 +1018,7 @@ async function handleTelegramMessage(message, update, env) {
   if (commandMatch) {
     const command = commandMatch[1].toLowerCase();
     const argText = (commandMatch[2] || '').trim();
-    const aliases = { 'کمک':'help', 'راهنما':'help', 'مکانها':'places', 'مکان‌ها':'places', 'تصادفی':'random', 'افزودن':'add', 'بازدید':'visit', 'آمار':'stats' };
+    const aliases = { 'کمک':'help', 'راهنما':'help', 'مکانها':'places', 'مکان‌ها':'places', 'تصادفی':'random', 'افزودن':'add', 'بازدید':'visit', 'آمار':'stats', 'تکراری':'duplicates' };
     const cmd = aliases[command] || command;
     if (cmd === 'start') return tgMessage(env, chatId, `سلام ${tgEscape(message.from.first_name || 'دوست من')}! 👋\nبه <b>Shiraz Atlas</b> خوش آمدی.\n\nمکان‌های موردعلاقه‌ات را ذخیره کن، مقصد تصادفی بگیر و مسیرهایت را ثبت کن.\n\n/help برای راهنما`);
     if (cmd === 'help') return tgMessage(env, chatId, formatHelp(admin,isOwner(fromId,env)),{reply_markup:botKeyboard(admin,isOwner(fromId,env))});
@@ -927,7 +1051,7 @@ async function handleTelegramMessage(message, update, env) {
       const data = await getBotData(env); const q = argText.toLowerCase();
       const list = data.places.filter(p => (admin || p.visibility !== 'private') && (!q || `${p.name} ${p.description} ${p.address} ${(p.tags||[]).join(' ')}`.toLowerCase().includes(q))).slice(0, 10);
       if (!list.length) return tgMessage(env, chatId, q ? 'نتیجه‌ای پیدا نشد.' : 'هنوز مکان عمومی ثبت نشده است.');
-      await tgMessage(env, chatId, `<b>📍 ${list.length} مکان ${q ? 'یافت‌شده' : 'ثبت‌شده'}</b>\n\nبرای مشاهده یا ویرایش، یک مکان را انتخاب کن.`, { reply_markup: { inline_keyboard: list.map(p => admin ? [{ text: `📍 ${p.name.slice(0,32)}`, callback_data: `pview:${p.id}` }, { text: '✏️', callback_data: `peditmenu:${p.id}` }] : [{ text: `📍 ${p.name.slice(0,40)}`, callback_data: `pview:${p.id}` }]) } });
+      await tgMessage(env, chatId, `<b>🧭 اطلس مکان‌ها</b>\n<blockquote>📍 ${list.length} مکان ${q ? 'یافت‌شده' : 'ثبت‌شده'}\nبرای مشاهدهٔ جزئیات یا ویرایش، یک مورد را انتخاب کن.</blockquote>\n<code>Shiraz Atlas · Places Index</code>`, { reply_markup: { inline_keyboard: list.map(p => admin ? [{ text: `📍 ${p.name.slice(0,32)}`, callback_data: `pview:${p.id}` }, { text: '✏️', callback_data: `peditmenu:${p.id}` }] : [{ text: `📍 ${p.name.slice(0,40)}`, callback_data: `pview:${p.id}` }]) } });
       if (list.length === 1) await sendPlace(env, chatId, list[0], data, admin);
       return;
     }
@@ -987,6 +1111,25 @@ async function handleTelegramMessage(message, update, env) {
     if (cmd === 'tagadd') {
       if (!admin) return tgMessage(env, chatId, '⛔ فقط ادمین.'); const saved=await adminMutation(env,'tag.create',{name:argText},update.update_id);if(saved.result?.duplicate)return;return tgMessage(env,chatId,`✅ برچسب «${tgEscape(argText)}» اضافه شد.`);
     }
+    if (cmd === 'duplicates') {
+      if (!admin) return tgMessage(env, chatId, '🔒 این گزارش فقط برای ادمین‌هاست.');
+      const data = await getBotData(env);
+      const threshold = duplicateThreshold(data.settings?.duplicateThreshold, 35);
+      const groups = findDuplicateGroups(data, threshold);
+      const valid = data.places.filter(hasValidCoordinates).length;
+      if (!groups.length) return tgMessage(env, chatId, `<b>🧹 گزارش پاک‌سازی اطلس</b>\n<blockquote>همهٔ ${data.places.length} رکورد بررسی شد؛ ${valid} مکان مختصات معتبر داشتند.\nدر شعاع ${threshold} متر گروه تکراری پیدا نشد.</blockquote>\n<code>SCAN COMPLETE · Shiraz Atlas</code>`);
+      const rows = [];
+      let actions = 0;
+      const report = groups.slice(0, 12).map((group, index) => {
+        const title = `${index + 1}. <b>${tgEscape(group.keep.name)}</b>`;
+        const members = group.duplicates.map(item => {
+          if (actions < 20) { rows.push([{ text: `🧩 ادغام «${item.name.slice(0,24)}»`, callback_data: `dconfirm:${group.keep.id}:${item.id}` }]); actions++; }
+          return `  └ ${tgEscape(item.name)} · ${item.distanceMeters}m`;
+        }).join('\n');
+        return `${title}\n${members}`;
+      }).join('\n\n');
+      return tgMessage(env, chatId, `<b>🔎 اسکن کامل مکان‌های اطلس</b>\n<blockquote>📚 ${data.places.length} رکورد بررسی شد\n📍 ${valid} مکان مختصات معتبر\n🧩 ${groups.length} گروه مشکوک · ${groups.reduce((n,g)=>n+g.duplicates.length,0)} مورد تکراری احتمالی\n📏 شعاع: ${threshold} متر</blockquote>\n${report}\n\n<i>هر ادغام جداگانه نیازمند تأیید نهایی توست. موارد بیشتر را از پنل سایت بررسی کن.</i>`, { reply_markup: { inline_keyboard: rows } });
+    }
     if (cmd === 'stats') {
       if (!admin) return tgMessage(env, chatId, '🔒 آمار مسیرها و بازدیدها خصوصی است.'); const data=await getBotData(env);const total=data.routes.reduce((s,r)=>s+(r.distanceMeters||0),0);const good=data.routes.filter(r=>r.quality==='good').length;
       return tgMessage(env,chatId,`<b>📊 آمار خصوصی اطلس</b>\n📍 مکان‌ها: ${data.places.length}\n🧭 مسیرها: ${data.routes.length}\n✅ بازدیدها: ${data.visits.length}\n🚗 مسافت ثبت‌شده: ${(total/1000).toFixed(1)} km\n🌟 مسیرهای خوب: ${good}`);
@@ -1041,6 +1184,36 @@ async function handleTelegramCallback(callback, update, env) {
     const hints = { categoryId: 'نام دسته‌بندی را بفرست.', coordinates: 'مختصات جدید را مثل 29.72, 52.53 بفرست.', tags: 'برچسب‌ها را با کاما جدا کن؛ برای پاک‌کردن بنویس «پاک شود».', accessModes: 'یک یا چند مورد را با کاما بفرست: پیاده‌روی، خودرو، موتورسیکلت، حمل‌ونقل عمومی، دوچرخه.', entryFee: 'مبلغ ورودی را به تومان و فقط به‌صورت عدد بفرست؛ برای پاک‌کردن «ندارد» بنویس.', estimatedCost: 'هزینهٔ تقریبی هر نفر را به تومان و فقط به‌صورت عدد بفرست.', rating: 'امتیاز ۰ تا ۵ را بفرست.', visibility: '«عمومی» یا «خصوصی» بفرست.', status: '«فعال»، «در برنامه بازدید» یا «تعطیل» بفرست.' };
     return tgMessage(env, chatId, `<b>${tgEscape(TELEGRAM_EDIT_FIELDS[field])}</b> · ${tgEscape(place.name)}\n${tgEscape(hints[field] || 'مقدار جدید را در پیام بعدی بفرست.')}\n\nبرای لغو، /cancel را بفرست.`, { reply_markup: { force_reply: true, selective: true, input_field_placeholder: 'مقدار جدید را وارد کن…' } });
   }
+  if (data === 'dcancel') {
+    await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id, text: 'ادغام لغو شد.' });
+    return;
+  }
+  if (data.startsWith('dconfirm:')) {
+    await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id });
+    if (!admin) return tgMessage(env, chatId, '⛔ دسترسی ادمین لازم است.');
+    const [, keepId, duplicateId] = data.split(':');
+    const current = await getBotData(env);
+    const keep = current.places.find(place => place.id === keepId);
+    const duplicate = current.places.find(place => place.id === duplicateId);
+    if (!keep || !duplicate) return tgMessage(env, chatId, 'یکی از مکان‌ها دیگر وجود ندارد؛ دوباره /duplicates را اجرا کن.');
+    const threshold = duplicateThreshold(current.settings?.duplicateThreshold, 35);
+    const distance = Math.round(haversine(keep, duplicate));
+    if (distance > threshold) return tgMessage(env, chatId, `⚠️ فاصلهٔ فعلی ${distance} متر است و از آستانهٔ ${threshold} متر بیشتر است. اسکن را دوباره انجام بده.`);
+    return tgMessage(env, chatId, `<b>⚠️ تأیید نهایی ادغام</b>\n<blockquote>مکان اصلی:\n<b>${tgEscape(keep.name)}</b>\n\nمکان تکراری:\n<b>${tgEscape(duplicate.name)}</b>\n\nفاصله: <code>${distance} متر</code>\n\nبازدیدها و اطلاعات تکمیلی منتقل می‌شوند؛ رکورد تکراری حذف خواهد شد.</blockquote>`, { reply_markup: { inline_keyboard: [[{ text: '✓ تأیید ادغام', callback_data: `dmerge:${keepId}:${duplicateId}` }, { text: 'لغو', callback_data: 'dcancel' }]] } });
+  }
+  if (data.startsWith('dmerge:')) {
+    await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id, text: 'در حال بررسی و ادغام…' });
+    if (!admin) return tgMessage(env, chatId, '⛔ دسترسی ادمین لازم است.');
+    const [, keepId, duplicateId] = data.split(':');
+    const current = await getBotData(env);
+    const threshold = duplicateThreshold(current.settings?.duplicateThreshold, 35);
+    try {
+      const result = await adminMutation(env, 'place.merge', { keepId, duplicateIds: [duplicateId], threshold }, update.update_id);
+      return tgMessage(env, chatId, `<b>✅ ادغام با موفقیت انجام شد</b>\n<blockquote>مکان اصلی: ${tgEscape(result.result.keepId)}\nرکورد حذف‌شده: <code>${tgEscape(duplicateId)}</code>\nبازدیدها به مکان اصلی منتقل شدند.</blockquote>\n<code>DATA CLEANUP · COMMITTED</code>`);
+    } catch (error) {
+      return tgMessage(env, chatId, `⚠️ ادغام انجام نشد: ${tgEscape(error.message)}`);
+    }
+  }
   if(data.startsWith('menu:')){
     await telegramCall(env,'answerCallbackQuery',{callback_query_id:callback.id});
     const cmd=data.slice(5);
@@ -1051,6 +1224,11 @@ async function handleTelegramCallback(callback, update, env) {
     await telegramCall(env,'answerCallbackQuery',{callback_query_id:callback.id});
     if(!admin)return tgMessage(env,chatId,'⛔ دسترسی ادمین لازم است.');
     return tgMessage(env,chatId,'🛠 پنل مدیریت\nبرای ثبت مکان، Location یا مختصات بفرست.\n<code>/add نام | lat,lng | دسته | ورودی | توضیحات</code>',{reply_markup:{inline_keyboard:[[{text:'🧪 تست سلامت',callback_data:'admin:test'},{text:'📊 آمار',callback_data:'admin:stats'}],[{text:'📚 راهنما',callback_data:'admin:help'}]]}});
+  }
+  if (data === 'admin:duplicates') {
+    await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id, text: 'در حال اسکن همه مکان‌ها…' });
+    if (!admin) return tgMessage(env, chatId, '⛔ دسترسی ادمین لازم است.');
+    return handleTelegramMessage({ chat: callback.message.chat, from: callback.from, text: '/duplicates' }, update, env);
   }
   if(data==='admin:test'){
     await telegramCall(env,'answerCallbackQuery',{callback_query_id:callback.id,text:'در حال بررسی...'});
@@ -1106,13 +1284,19 @@ async function routeRequest(request, env) {
     try { const current = await readData(env); return json({ ...current.data, isAdmin: true }); }
     catch (error) { return json({ error: error.message }, 503); }
   }
+  if (path === '/api/admin/name-suggestion' && request.method === 'GET') {
+    if (!await requireAdmin(request, env)) return json({ error: 'نشست ادمین معتبر نیست.' }, 401);
+    const suggestion = await reversePlaceName(env, url.searchParams.get('lat'), url.searchParams.get('lng'));
+    return json({ ok: Boolean(suggestion), suggestion });
+  }
   if (path === '/api/admin/duplicates' && request.method === 'GET') {
     if (!await requireAdmin(request, env)) return json({ error: 'نشست ادمین معتبر نیست.' }, 401);
     try {
       const current = await readData(env);
       const threshold = duplicateThreshold(url.searchParams.get('threshold'), current.data.settings?.duplicateThreshold || 35);
       const groups = findDuplicateGroups(current.data, threshold);
-      return json({ threshold, groups, duplicatePlaces: groups.reduce((sum, group) => sum + group.duplicates.length, 0), scannedPlaces: current.data.places.length });
+      const validCoordinates = current.data.places.filter(hasValidCoordinates).length;
+      return json({ threshold, groups, duplicatePlaces: groups.reduce((sum, group) => sum + group.duplicates.length, 0), scannedPlaces: current.data.places.length, validCoordinatePlaces: validCoordinates, skippedPlaces: current.data.places.length - validCoordinates });
     } catch (error) { return json({ error: error.message }, 503); }
   }
   if (path === '/api/admin/mutate' && request.method === 'POST') return handleMutation(request, env);
