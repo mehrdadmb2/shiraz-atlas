@@ -9,6 +9,10 @@
 - GitHub Fine-grained PAT فقط برای ریپوی خصوصی `mehrdadmb2/shiraz-atlas-data` با دسترسی `Contents: Read and write`
 - توکن BotFather برای `@ShirazAtlasBot`
 
+## سازگاری Windows PowerShell 5.1
+
+فایل‌های `.ps1` این نسخه با UTF-8 BOM ذخیره شده‌اند تا PowerShell 5.1 متن فارسی را درست بخواند. فایل‌ها را با Notepad در حالت ANSI ذخیره نکن؛ اگر ویرایششان کردی، از UTF-8 with BOM استفاده کن.
+
 ## نصب و تست
 
 در PowerShell از همین پوشه اجرا کن:

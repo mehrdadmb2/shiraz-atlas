@@ -1,31 +1,51 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
+
+if (-not (Test-Path '.\wrangler.toml')) {
+    throw 'Run this script from the Worker directory; wrangler.toml was not found.'
+}
+if (-not (Get-Command npx -ErrorAction SilentlyContinue)) {
+    throw 'Node.js/npm (npx) was not found. Install Node.js LTS and reopen PowerShell.'
+}
 
 function Read-SecretValue([string]$Prompt) {
     $secure = Read-Host $Prompt -AsSecureString
+    if ($null -eq $secure -or $secure.Length -eq 0) { return '' }
     $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-    try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) }
-    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
+    try {
+        return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
+    }
+    finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
+    }
 }
 
 function New-WebhookSecret {
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
     $bytes = New-Object byte[] 36
-    $rng.GetBytes($bytes); $rng.Dispose()
-    $value = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_')
-    [Array]::Clear($bytes, 0, $bytes.Length)
-    return $value
+    try {
+        $rng.GetBytes($bytes)
+        return [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+    }
+    finally {
+        $rng.Dispose()
+        [Array]::Clear($bytes, 0, $bytes.Length)
+    }
 }
 
-Write-Host "`nShiraz Atlas · Telegram Webhook Setup`n" -ForegroundColor Green
-$botToken = Read-SecretValue 'توکن ربات تلگرام را وارد کن'
-if ($botToken -notmatch '^\d+:[A-Za-z0-9_-]{20,}$') { throw 'قالب توکن تلگرام معتبر نیست.' }
+Write-Host "`nShiraz Atlas - Telegram Webhook Setup`n" -ForegroundColor Green
+$botToken = Read-SecretValue 'Enter the Telegram bot token'
+if ([string]::IsNullOrWhiteSpace($botToken)) { throw 'Telegram bot token cannot be empty.' }
+if ($botToken -notmatch '^\d+:[A-Za-z0-9_-]{20,}$') { throw 'Telegram bot token format is invalid.' }
+
 $workerUrl = 'https://shiraz-atlas.game-developer-mb.workers.dev/telegram/webhook'
 $webhookSecret = New-WebhookSecret
 
-Write-Host 'در حال ثبت secret مشترک بین Cloudflare و Telegram...' -ForegroundColor Cyan
-@($webhookSecret) | & npx wrangler secret put TELEGRAM_WEBHOOK_SECRET --config .\wrangler.toml
-if ($LASTEXITCODE -ne 0) { throw 'ذخیره TELEGRAM_WEBHOOK_SECRET در Cloudflare ناموفق بود.' }
+Write-Host 'Saving the shared webhook secret to Cloudflare...' -ForegroundColor Cyan
+$webhookSecret | & npx wrangler secret put TELEGRAM_WEBHOOK_SECRET --config .\wrangler.toml
+if ($LASTEXITCODE -ne 0) { throw 'Could not save TELEGRAM_WEBHOOK_SECRET in Cloudflare.' }
 
+# Persian descriptions are intentional. This file is saved as UTF-8 with BOM
+# so Windows PowerShell 5.1 reads these strings correctly.
 $commands = @(
     @{ command = 'start'; description = 'شروع و معرفی ربات' },
     @{ command = 'help'; description = 'راهنمای کامل دستورات' },
@@ -53,15 +73,21 @@ $webhookBody = @{
     drop_pending_updates = $false
     max_connections = 20
 }
-$webhookResponse = Invoke-RestMethod -Method Post -Uri "https://api.telegram.org/bot$botToken/setWebhook" -ContentType 'application/json' -Body ($webhookBody | ConvertTo-Json -Depth 8 -Compress)
+$webhookJson = $webhookBody | ConvertTo-Json -Depth 8 -Compress
+$webhookResponse = Invoke-RestMethod -Method Post -Uri "https://api.telegram.org/bot$botToken/setWebhook" -ContentType 'application/json; charset=utf-8' -Body $webhookJson
 if (-not $webhookResponse.ok) { throw "Telegram setWebhook failed: $($webhookResponse.description)" }
 
-$commandsResponse = Invoke-RestMethod -Method Post -Uri "https://api.telegram.org/bot$botToken/setMyCommands" -ContentType 'application/json' -Body (@{ commands = $commands } | ConvertTo-Json -Depth 8 -Compress)
-if (-not $commandsResponse.ok) { Write-Warning "Webhook ست شد اما setMyCommands موفق نبود: $($commandsResponse.description)" }
+$commandsJson = @{ commands = $commands } | ConvertTo-Json -Depth 8 -Compress
+$commandsResponse = Invoke-RestMethod -Method Post -Uri "https://api.telegram.org/bot$botToken/setMyCommands" -ContentType 'application/json; charset=utf-8' -Body $commandsJson
+if (-not $commandsResponse.ok) {
+    Write-Warning "Webhook is configured, but setMyCommands failed: $($commandsResponse.description)"
+}
 
 $info = Invoke-RestMethod -Method Get -Uri "https://api.telegram.org/bot$botToken/getWebhookInfo"
-Write-Host "`nWebhook result:" -ForegroundColor Green
+Write-Host "`nWebhook result:`n" -ForegroundColor Green
 $info.result | Select-Object url, has_custom_certificate, pending_update_count, max_connections, last_error_date, last_error_message | Format-List
-if ($info.result.url -ne $workerUrl) { throw 'آدرس Webhook با آدرس مورد انتظار تطابق ندارد.' }
-Write-Host 'Webhook و منوی دستورات تنظیم شدند. توکن و secret در فایل نوشته نشدند.' -ForegroundColor Green
-$botToken = $null; $webhookSecret = $null
+if ($info.result.url -ne $workerUrl) { throw 'Webhook URL does not match the expected Worker URL.' }
+
+Write-Host 'Webhook and bot command menu configured successfully.' -ForegroundColor Green
+$botToken = $null
+$webhookSecret = $null
