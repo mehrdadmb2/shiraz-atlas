@@ -27,3 +27,94 @@ button:active,.button:active{transform:translateY(0) scale(.985)}
 .place-visual img{transition:transform .65s cubic-bezier(.2,.7,.2,1),filter .4s}
 .place-card:hover .place-visual img{transform:scale(1.055);filter:saturate(1.12)}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+/* Shiraz Atlas 1.2 — animated ambient environment, resilient map and weather scenes */
+body{position:relative;background-attachment:fixed}
+body:before{z-index:0;opacity:.72;animation:atlasBackdropShift 26s ease-in-out infinite alternate;background-size:auto,76px 76px}
+.ambient{z-index:0;opacity:.25;filter:blur(105px);mix-blend-mode:screen}
+.ambient-one{width:520px;height:520px;animation:atlasAmbientOne 22s ease-in-out infinite alternate}
+.ambient-two{width:620px;height:620px;animation:atlasAmbientTwo 28s ease-in-out infinite alternate}
+.ambient-grid{z-index:0;opacity:.16;mask-image:linear-gradient(to bottom,rgba(0,0,0,.8),transparent 92%);animation:atlasGridDrift 42s linear infinite}
+.app-shell{position:relative;z-index:1}
+@keyframes atlasBackdropShift{0%{background-position:0 0,0 0}100%{background-position:100% 0,76px 38px}}
+@keyframes atlasAmbientOne{0%{transform:translate3d(-25px,-20px,0) scale(.88)}50%{transform:translate3d(35px,26px,0) scale(1.12)}100%{transform:translate3d(-5px,55px,0) scale(1.02)}}
+@keyframes atlasAmbientTwo{0%{transform:translate3d(35px,18px,0) scale(1.05)}50%{transform:translate3d(-38px,-20px,0) scale(.9)}100%{transform:translate3d(22px,-50px,0) scale(1.12)}}
+@keyframes atlasGridDrift{from{background-position:0 0,0 0}to{background-position:54px 54px,54px 54px}}
+.light-theme .ambient{opacity:.18;mix-blend-mode:multiply}
+.light-theme .ambient-grid{opacity:.11}
+.glass{background-image:linear-gradient(135deg,rgba(255,255,255,.035),transparent 42%);}
+.light-theme .glass{background-image:linear-gradient(135deg,rgba(255,255,255,.34),transparent 48%)}
+
+/* CARTO raster tiles need a key since Sep 2026. Darken the keyless OSM base locally. */
+.leaflet-tile-pane.atlas-map-dark .leaflet-tile{filter:invert(.88) hue-rotate(180deg) saturate(.62) brightness(.78) contrast(.93);}
+.leaflet-container{background:#0a1724}
+.light-theme .leaflet-container{background:#e7eff2}
+#map-status{padding:4px 8px;border:1px solid var(--panel-border);border-radius:999px;background:rgba(93,150,163,.07);white-space:normal}
+#map-status[data-state="online"]{color:var(--green)}
+#map-status[data-state="fallback"]{color:var(--amber)}
+#map-status[data-state="loading"]{color:var(--cyan)}
+#map-status[data-state="offline"],#map-status[data-state="error"]{color:var(--red)}
+.map-license{font-size:8px;color:var(--muted-2)}
+
+.weather-card{position:relative;isolation:isolate;overflow:hidden;min-height:260px;transition:background .5s,border-color .5s,box-shadow .5s}
+.weather-card>*:not(.weather-aura){position:relative;z-index:2}
+.weather-aura{position:absolute!important;z-index:0!important;inset:-55% -30%;pointer-events:none;opacity:.8;background:radial-gradient(ellipse at 68% 40%,rgba(246,198,108,.2),transparent 36%),radial-gradient(ellipse at 20% 80%,rgba(77,224,193,.15),transparent 42%);animation:weatherAura 18s ease-in-out infinite alternate}
+@keyframes weatherAura{from{transform:translate3d(-2%,2%,0) rotate(-7deg) scale(.94)}to{transform:translate3d(4%,-3%,0) rotate(8deg) scale(1.12)}}
+.weather-card:after{content:"";position:absolute;inset:-20%;z-index:1;pointer-events:none;opacity:0;background-size:100% 100%;}
+.weather-card.weather-sunny{background:linear-gradient(145deg,rgba(115,77,29,.25),var(--panel) 58%,rgba(22,130,120,.12))}
+.weather-card.weather-sunny .weather-aura{background:radial-gradient(ellipse at 70% 25%,rgba(255,196,91,.36),transparent 31%),radial-gradient(ellipse at 20% 90%,rgba(77,224,193,.13),transparent 40%)}
+.weather-card.weather-sunny .weather-symbol{color:#ffd36d;text-shadow:0 0 25px rgba(255,197,88,.68);animation:sunPulse 4s ease-in-out infinite}
+@keyframes sunPulse{50%{transform:rotate(12deg) scale(1.12);filter:drop-shadow(0 0 12px rgba(255,200,89,.6))}}
+.weather-card.weather-cloudy{background:linear-gradient(145deg,rgba(65,101,129,.27),var(--panel) 60%)}
+.weather-card.weather-cloudy .weather-aura{background:radial-gradient(ellipse at 76% 28%,rgba(172,206,226,.24),transparent 36%),radial-gradient(ellipse at 15% 100%,rgba(91,157,187,.14),transparent 42%)}
+.weather-card.weather-fog{background:linear-gradient(145deg,rgba(113,139,151,.25),var(--panel) 58%)}
+.weather-card.weather-fog .weather-aura{background:repeating-linear-gradient(165deg,transparent 0 25px,rgba(201,224,228,.07) 30px 37px,transparent 48px);animation:fogDrift 15s ease-in-out infinite alternate}
+@keyframes fogDrift{from{transform:translateX(-8%)}to{transform:translateX(8%)}}
+.weather-card.weather-rain{background:linear-gradient(145deg,rgba(25,88,130,.36),var(--panel) 62%,rgba(39,65,102,.2))}
+.weather-card.weather-rain:after{opacity:.55;background:repeating-linear-gradient(105deg,transparent 0 17px,rgba(115,207,245,.19) 18px 19px,transparent 20px 33px);animation:rainFall .8s linear infinite}
+@keyframes rainFall{from{transform:translate3d(-4%, -3%,0)}to{transform:translate3d(4%, 5%,0)}}
+.weather-card.weather-snow{background:linear-gradient(145deg,rgba(95,135,169,.32),var(--panel) 65%)}
+.weather-card.weather-snow:after{opacity:.58;background-image:radial-gradient(circle,rgba(239,250,255,.8) 1px,transparent 2px),radial-gradient(circle,rgba(194,229,250,.65) 1px,transparent 2px);background-size:34px 38px,57px 66px;background-position:0 0,18px 27px;animation:snowFall 7s linear infinite}
+@keyframes snowFall{from{transform:translateY(-4%)}to{transform:translateY(7%)}}
+.weather-card.weather-storm{background:linear-gradient(145deg,rgba(69,64,111,.42),var(--panel) 65%,rgba(33,66,106,.25))}
+.weather-card.weather-storm:after{background:rgba(189,209,255,.13);animation:stormFlash 6s steps(1,end) infinite}
+@keyframes stormFlash{0%,88%,91%,100%{opacity:0}89%,90%{opacity:.75}}
+.weather-card.weather-night{background:linear-gradient(145deg,rgba(40,47,109,.4),var(--panel) 65%,rgba(28,79,120,.22))}
+.weather-card.weather-night .weather-aura{background:radial-gradient(circle at 76% 25%,rgba(158,164,255,.24),transparent 29%),radial-gradient(circle at 24% 85%,rgba(83,157,216,.15),transparent 40%)}
+.weather-card.weather-night .weather-symbol{color:#c4c5ff;text-shadow:0 0 22px rgba(171,170,255,.55)}
+.weather-card.weather-hot{border-color:rgba(255,177,88,.26)}
+.weather-card.weather-hot .weather-aura{background:radial-gradient(ellipse at 72% 30%,rgba(255,128,64,.3),transparent 34%),radial-gradient(ellipse at 10% 100%,rgba(255,205,104,.14),transparent 44%);filter:blur(9px)}
+.weather-card.weather-cold{border-color:rgba(134,202,248,.28)}
+.weather-card.weather-cold .weather-aura{background:radial-gradient(ellipse at 70% 26%,rgba(106,195,255,.27),transparent 36%),radial-gradient(ellipse at 15% 100%,rgba(190,233,255,.13),transparent 46%)}
+.weather-card.weather-weekend{box-shadow:0 22px 65px rgba(28,138,130,.18),inset 0 0 0 1px rgba(100,230,200,.06)}
+.weather-heading{margin-bottom:12px}
+.weather-head-actions{display:flex;align-items:center;gap:7px}
+.weather-special{font-size:8px;font-weight:800;color:var(--teal);background:rgba(77,224,193,.09);border:1px solid rgba(77,224,193,.18);border-radius:999px;padding:5px 8px;white-space:nowrap}
+.weather-refresh{width:29px;height:29px;border-radius:9px;border:1px solid var(--panel-border);background:rgba(120,165,179,.08);color:var(--text);font-size:17px;line-height:1;transition:transform .3s,border-color .2s}
+.weather-refresh:hover{transform:rotate(90deg);border-color:rgba(77,224,193,.45)}
+.weather-main{gap:11px;position:relative}
+.weather-main .weather-symbol{display:grid;place-items:center;width:47px;height:47px;font-size:31px;flex-shrink:0}
+.weather-main>strong{font-size:37px}
+.weather-main div{min-width:0}
+.weather-main b{line-height:1.7}
+.weather-details{gap:8px;margin-top:2px}
+.weather-details span{padding:8px 5px;border:1px solid var(--panel-border);border-radius:11px;background:rgba(120,165,179,.055)}
+.weather-details i{font-style:normal;font-size:14px}
+.weather-forecast-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:15px 0 8px}
+.weather-forecast-head>b{font-size:10px}
+.weather-forecast-head>small{font-size:8px;color:var(--muted-2)}
+.weather-forecast{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+.weather-day{display:flex;min-width:0;flex-direction:column;align-items:center;gap:5px;padding:9px 5px;border:1px solid var(--panel-border);border-radius:12px;background:rgba(120,165,179,.07);text-align:center}
+.weather-day>small{font-size:8px;color:var(--muted)}
+.weather-day>span{font-size:19px;line-height:1.4}
+.weather-day>b{font:800 10px var(--font-en);white-space:nowrap}
+.weather-day>b i{font-style:normal;font-weight:500;color:var(--muted-2)}
+.weather-day>em{font:700 8px var(--font-fa);font-style:normal;color:var(--cyan)}
+.weather-forecast-empty{grid-column:1/-1;padding:12px;border:1px dashed var(--panel-border);border-radius:10px;color:var(--muted-2);font-size:9px;text-align:center}
+.weather-footer{align-items:center;flex-wrap:wrap}
+.weather-stale .weather-special{color:var(--amber);border-color:rgba(246,198,108,.25);background:rgba(246,198,108,.08)}
+.weather-error .weather-special{color:var(--red);border-color:rgba(255,126,136,.25)}
+.weather-loading .weather-refresh{animation:refreshSpin 1.2s linear infinite}
+@keyframes refreshSpin{to{transform:rotate(360deg)}}
+@media(max-width:700px){.weather-forecast{gap:5px}.weather-day{padding:8px 3px}.weather-day>b{font-size:9px}.weather-special{font-size:7px}.weather-main .weather-symbol{width:40px;height:40px;font-size:27px}}
+@media(prefers-reduced-motion:reduce){.ambient,.ambient-grid,.weather-aura,.weather-card:after,.weather-symbol,.weather-refresh{animation:none!important;transition:none!important}}

@@ -10,10 +10,11 @@
     <a href="https://shiraz-atlas.game-developer-mb.workers.dev/api/health"><img src="https://img.shields.io/website?url=https%3A%2F%2Fshiraz-atlas.game-developer-mb.workers.dev%2Fapi%2Fhealth&label=API%20health&style=for-the-badge" alt="API health"></a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/Version-1.1.0-8b7cff?style=flat-square">
+    <img src="https://img.shields.io/badge/Version-1.2.0-8b7cff?style=flat-square">
     <img src="https://img.shields.io/badge/Frontend-GitHub%20Pages-181717?style=flat-square&logo=github">
     <img src="https://img.shields.io/badge/API-Cloudflare%20Workers-F38020?style=flat-square&logo=cloudflare">
     <img src="https://img.shields.io/badge/Map-Leaflet%20%2B%20OSM-72b85a?style=flat-square">
+    <img src="https://img.shields.io/badge/Offline-Visited%20tiles-16b99d?style=flat-square">
     <img src="https://img.shields.io/badge/Bot-Telegram-229ED9?style=flat-square&logo=telegram">
     <img src="https://img.shields.io/badge/Data-Private%20GitHub%20Repo-16a34a?style=flat-square&logo=github">
     <img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square">
@@ -26,20 +27,21 @@
 
 **Shiraz Atlas** is a map-first personal discovery and trip journal for Shiraz, Iran. Save favorite places, organize them with categories and flexible tags, explore nearby spots, estimate routes, record visits, and visualize your exploration footprint.
 
-The public GitHub Pages frontend talks to a Cloudflare Worker. The Worker is the only trusted gateway to the private data repository and Telegram Bot API.
+The public GitHub Pages frontend talks to a Cloudflare Worker. The Worker is the only trusted gateway to the private data repository and Telegram Bot API. The map uses a keyless OSM tile source with a documented fallback; the dark appearance is rendered locally. Weather data is served through the Worker cache and has a browser-side direct-source fallback.
 
 ## 🚀 Features
 
 | Module | Capabilities |
 |---|---|
-| 🗺️ Interactive atlas | Leaflet map, place markers, route overlays, category/tag filters |
+| 🗺️ Interactive atlas | Leaflet map, keyless OSM base, automatic tile-source fallback, place markers, route overlays and category/tag filters |
+| 📴 Offline resilience | Service Worker keeps the app shell and successfully viewed map tiles on the same device; no prohibited bulk tile prefetch |
 | 📍 Place library | Create, edit, delete, coordinates, images, entry fees, estimated costs, ratings and notes |
 | 🏷️ Organization | Editable categories and independent tags; starter tags include دوستانه، پشتو، تاریک، Skybit |
 | 🧭 Route journal | Route coordinates, distance estimate, travel mode, quality and private notes |
 | ✅ Visit journal | Visit history, date, quality, duration and private notes |
 | 📊 Exploration analytics | Visit totals, route distance and approximate grid coverage |
 | 🎲 Discovery | Random destination, nearby OpenStreetMap discovery and search |
-| 🌤️ Context | Destination weather and route preview |
+| 🌤️ Context | Current weather, feels-like temperature, humidity, wind, precipitation and three-day forecast; direct API fallback and last-known local data |
 | 🤖 Telegram UX | Inline keyboards, quick actions, location sharing, admin menu and command shortcuts |
 | 👥 Admin delegation | Owner can add/remove Telegram admins from the bot without editing code |
 | 🧪 Diagnostics | `/test` and authenticated `/api/admin/diagnostics` inspect Worker configuration, private GitHub data and Telegram webhook |
@@ -145,3 +147,14 @@ npx wrangler tail --format pretty
 ## 📜 License
 
 MIT for the project source. External map tiles, geographic data and weather services retain their own attribution and terms.
+
+
+## 🗺️ Map reliability and offline behaviour
+
+The old CARTO Dark Matter raster URL has been removed because CARTO basemaps now require an API key. Shiraz Atlas uses the standard OSM tile source and can switch to OpenTopoMap-R if the primary source repeatedly fails. The dark map theme is produced locally with a tile filter, so it does not need a second paid/keyed basemap.
+
+The Service Worker stores the app shell, Leaflet runtime, the public map snapshot and only map tiles that a visitor has actually viewed, on that visitor's own browser/device. It does not download an entire city or commit third-party tiles into the repository. Private admin data is never stored in the public offline snapshot. The OSM tile policy prohibits bulk prefetching and offline tile archives from `tile.openstreetmap.org`; a shared repository snapshot therefore must be built from a separately licensed regional OSM data extract and a self-hosted tile pipeline. See [UPGRADE-1.2.0-FA.md](UPGRADE-1.2.0-FA.md).
+
+## 🌤️ Weather fallback
+
+The browser first asks the Cloudflare Worker for current conditions and a three-day forecast. If the Worker path fails, it makes a direct Open-Meteo request. The last successful response is retained locally for up to 12 hours, with a visible stale-data indicator. The card changes its atmosphere according to weather code, day/night, temperature, the Shiraz season and the local weekend.

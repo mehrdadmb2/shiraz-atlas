@@ -13,9 +13,34 @@
   const currentCenter=()=>{const c=window.AtlasMap.map?.getCenter?.();return c?{lat:c.lat,lng:c.lng}:state.settings?.center||{lat:29.5918,lng:52.5837};};
   const safeUrl=value=>{try{const u=new URL(value);return ['https:','http:'].includes(u.protocol)?u.href:'';}catch{return '';}};
   const apiError=(e)=>{console.error(e);toast(e.message||'خطای نامشخص رخ داد.','error');};
+  const PUBLIC_SNAPSHOT_KEY='shiraz_atlas_public_state_v1';
+  function savePublicSnapshot(data){
+    if(data?.isAdmin)return;
+    // Only the public API response is persisted; private admin state and notes are never cached.
+    try{localStorage.setItem(PUBLIC_SNAPSHOT_KEY,JSON.stringify({savedAt:Date.now(),data}));}catch(error){console.warn('Public offline snapshot could not be saved:',error);}
+  }
+  function readPublicSnapshot(){
+    try{const snapshot=JSON.parse(localStorage.getItem(PUBLIC_SNAPSHOT_KEY)||'null');return snapshot?.data? snapshot:null;}catch{return null;}
+  }
   async function loadState(){
-    try{state=await API.state(API.isAuthenticated);admin=Boolean(state.isAdmin);}
-    catch(error){if(API.isAuthenticated){await API.logout();try{state=await API.state(false);admin=false;}catch(err){throw err;}}else throw error;}
+    const hadAdminSession=API.isAuthenticated;
+    try{
+      state=await API.state(hadAdminSession);
+      admin=Boolean(state.isAdmin);
+      if(!admin)savePublicSnapshot(state);
+    }catch(error){
+      if(hadAdminSession){
+        await API.logout();
+        try{state=await API.state(false);admin=false;savePublicSnapshot(state);}
+        catch(publicError){const snapshot=readPublicSnapshot();if(!snapshot)throw publicError;state=snapshot.data;admin=false;toast('اتصال قطع است؛ نسخهٔ عمومی ذخیره‌شده نمایش داده می‌شود.','error');}
+      }else{
+        const snapshot=readPublicSnapshot();
+        if(!snapshot)throw error;
+        state=snapshot.data;admin=false;
+        const age=Math.max(0,Date.now()-Number(snapshot.savedAt||Date.now()));
+        toast(`حالت آفلاین فعال شد · داده‌های عمومی ذخیره‌شده (${Math.floor(age/86400000)} روز قبل)`,'error');
+      }
+    }
     showAdmin();renderAll();
   }
   function allPlaces(){return (state.places||[]).filter(p=>p&&Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng)));}
@@ -55,9 +80,117 @@
   }
   function renderView(){const map=$('#map-section'),places=$('#places-section');map.classList.toggle('hidden',!['overview','map'].includes(currentView));places.classList.toggle('hidden',!['overview','places'].includes(currentView));$('#journeys-section').classList.toggle('hidden',currentView!=='journeys');$('#discover-section').classList.toggle('hidden',currentView!=='discover');$('#insights-section').classList.toggle('hidden',currentView!=='insights');$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===currentView));if(['map','overview'].includes(currentView))setTimeout(()=>window.AtlasMap.map?.invalidateSize(),140);}
   function switchView(view){currentView=view;renderView();$('#mobile-nav').classList.remove('open');if(view==='map')$('#map-section').scrollIntoView({behavior:'smooth',block:'start'});else if(view==='places')$('#places-section').scrollIntoView({behavior:'smooth',block:'start'});else if(view==='journeys')$('#journeys-section').scrollIntoView({behavior:'smooth',block:'start'});else if(view==='discover')$('#discover-section').scrollIntoView({behavior:'smooth',block:'start'});else if(view==='insights')$('#insights-section').scrollIntoView({behavior:'smooth',block:'start'});}
-  async function loadWeather(lat,lng){try{const w=await API.weather(lat,lng);const c=w.current||{};setText('#weather-temp',`${Math.round(c.temperature_2m??0).toLocaleString('fa-IR')}°`);setText('#weather-desc',U.weatherText(c.weather_code));setText('#weather-feels',`احساس واقعی ${Math.round(c.apparent_temperature??0).toLocaleString('fa-IR')}°`);setText('#weather-humidity',`${U.fmt(c.relative_humidity_2m??0)}٪`);setText('#weather-wind',`${U.fmt(c.wind_speed_10m??0)} km/h`);setText('#weather-rain',`${U.fmt(c.precipitation??0)} mm`);setText('#weather-icon',U.weatherIcon(c.weather_code));}catch(e){setText('#weather-desc','دریافت هوا ممکن نشد');console.warn(e);}}
+  const weatherCacheKey=(lat,lng)=>`shiraz_atlas_weather_${Number(lat).toFixed(2)}_${Number(lng).toFixed(2)}`;
+  const weatherValue=(value,digits=0)=>value===null||value===undefined||value===''||!Number.isFinite(Number(value))?'—':Number(value).toLocaleString('fa-IR',{maximumFractionDigits:digits});
+  const weatherCondition=(code,isDay)=>{
+    if(code===0)return isDay?'sunny':'night';
+    if(code===1)return isDay?'sunny':'night';
+    if(code===2||code===3)return 'cloudy';
+    if(code===45||code===48)return 'fog';
+    if(code>=51&&code<=67||code>=80&&code<=82)return 'rain';
+    if(code>=71&&code<=77||code===85||code===86)return 'snow';
+    if(code>=95)return 'storm';
+    return isDay?'cloudy':'night';
+  };
+  const weatherVisual=(code,isDay)=>{
+    if(code===0)return isDay?'☀️':'🌙';
+    if(code===1||code===2)return isDay?'🌤️':'☁️';
+    if(code===3)return '☁️';
+    if(code===45||code===48)return '🌫️';
+    if(code>=51&&code<=67)return '🌧️';
+    if(code>=71&&code<=77||code===85||code===86)return '❄️';
+    if(code>=80&&code<=82)return '🌦️';
+    if(code>=95)return '⛈️';
+    return '🌤️';
+  };
+  const weatherSeason=()=>{
+    const month=Number(new Intl.DateTimeFormat('en-US',{month:'numeric',timeZone:'Asia/Tehran'}).format(new Date()));
+    if([3,4,5].includes(month))return 'بهار شیراز';
+    if([6,7,8].includes(month))return 'تابستان شیراز';
+    if([9,10,11].includes(month))return 'پاییز شیراز';
+    return 'زمستان شیراز';
+  };
+  const weatherWeekday=()=>new Intl.DateTimeFormat('fa-IR',{weekday:'long',timeZone:'Asia/Tehran'}).format(new Date());
+  function renderWeather(data,meta={}){
+    const current=data?.current||{};
+    if(current.temperature_2m===null||current.temperature_2m===undefined||!Number.isFinite(Number(current.temperature_2m)))throw new Error('پاسخ هواشناسی فاقد دمای معتبر است.');
+    const code=Number(current.weather_code??-1),isDay=Number(current.is_day??1)===1,temp=Number(current.temperature_2m);
+    const card=$('#weather-card');
+    const classes=['weather-card',`weather-${weatherCondition(code,isDay)}`];
+    if(!isDay)classes.push('weather-night');
+    if(temp>=35)classes.push('weather-hot');
+    if(temp<=4)classes.push('weather-cold');
+    const weekday=weatherWeekday();
+    if(weekday.includes('پنج')||weekday.includes('جمع'))classes.push('weather-weekend');
+    card.className=`side-card glass ${classes.join(' ')}`;
+    card.dataset.weather=weatherCondition(code,isDay);
+    setText('#weather-temp',`${weatherValue(temp)}°`);
+    setText('#weather-desc',U.weatherText(code));
+    setText('#weather-feels',`دمای حس‌شده ${weatherValue(current.apparent_temperature)}°`);
+    setText('#weather-humidity',`${weatherValue(current.relative_humidity_2m)}٪`);
+    setText('#weather-wind',`${weatherValue(current.wind_speed_10m)} km/h`);
+    setText('#weather-rain',`${weatherValue(current.precipitation,1)} mm`);
+    setText('#weather-icon',weatherVisual(code,isDay));
+    const special=temp>=35?'☀️ هوای گرم':temp<=4?'❄️ هوای سرد':!isDay?'🌙 آسمان شب':weekday.includes('پنج')||weekday.includes('جمع')?'✨ آخر هفتهٔ شیراز':`${weekday} · ${weatherSeason()}`;
+    setText('#weather-special',special);
+    setText('#weather-location',meta.location||'شیراز، ایران');
+    const daily=data.daily||{},times=daily.time||[],forecast=$('#weather-forecast');
+    forecast.innerHTML=times.slice(0,3).map((day,index)=>{
+      const label=index===0?'امروز':index===1?'فردا':new Intl.DateTimeFormat('fa-IR',{weekday:'short',timeZone:'Asia/Tehran'}).format(new Date(`${day}T12:00:00`));
+      const dayCode=Number(daily.weather_code?.[index]??-1);
+      const max=weatherValue(daily.temperature_2m_max?.[index]),min=weatherValue(daily.temperature_2m_min?.[index]);
+      const rain=weatherValue(daily.precipitation_probability_max?.[index]);
+      return `<div class="weather-day"><small>${label}</small><span>${weatherVisual(dayCode,true)}</span><b>${max}° <i>${min}°</i></b><em>💧 ${rain}٪</em></div>`;
+    }).join('')||'<div class="weather-forecast-empty">اطلاعات پیش‌بینی در پاسخ سرویس موجود نبود.</div>';
+    if(meta.stale){setText('#weather-updated',`ذخیره‌شده · ${new Date(meta.savedAt||Date.now()).toLocaleTimeString('fa-IR',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Tehran'})}`);card.classList.add('weather-stale');}
+    else {setText('#weather-updated',`به‌روزرسانی ${new Date().toLocaleTimeString('fa-IR',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Tehran'})}`);card.classList.remove('weather-stale');}
+    card.classList.remove('weather-loading','weather-error');
+  }
+  async function fetchWeatherDirect(lat,lng){
+    const query=new URLSearchParams({latitude:String(lat),longitude:String(lng),current:'temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m',daily:'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max',timezone:'auto',forecast_days:'3'});
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),11000);
+    try{const response=await fetch(`https://api.open-meteo.com/v1/forecast?${query}`,{signal:controller.signal,headers:{Accept:'application/json'}});if(!response.ok)throw new Error(`Open-Meteo HTTP ${response.status}`);return await response.json();}
+    finally{clearTimeout(timer);}
+  }
+  async function loadWeather(lat,lng,location='شیراز، ایران',force=false){
+    const key=weatherCacheKey(lat,lng),cacheAge=12*60*60*1000;
+    let cached=null;
+    try{cached=JSON.parse(localStorage.getItem(key)||'null');}catch{}
+    if(cached?.data&&!force){try{renderWeather(cached.data,{stale:Date.now()-cached.savedAt>10*60*1000,savedAt:cached.savedAt,location});}catch{}}
+    const card=$('#weather-card');
+    if(!cached?.data)card?.classList.add('weather-loading');
+    let lastError=null;
+    // First use the Worker proxy (edge cache); if it is unreachable, call Open-Meteo directly.
+    try{
+      let data;
+      try{data=await API.weather(lat,lng);}catch(workerError){lastError=workerError;data=await fetchWeatherDirect(lat,lng);}
+      renderWeather(data,{location});
+      localStorage.setItem(key,JSON.stringify({savedAt:Date.now(),data}));
+      return data;
+    }catch(error){lastError=error;}
+    if(cached?.data&&Date.now()-cached.savedAt<=cacheAge){
+      try{renderWeather(cached.data,{stale:true,savedAt:cached.savedAt,location});setText('#weather-special','دادهٔ ذخیره‌شده');return cached.data;}catch{}
+    }
+    card?.classList.remove('weather-loading');card?.classList.add('weather-error');
+    setText('#weather-desc','دریافت دادهٔ هواشناسی ممکن نشد');
+    setText('#weather-special','اتصال هواشناسی قطع است');
+    setText('#weather-updated','اتصال را بررسی و دوباره تلاش کن');
+    if(lastError)console.warn('Shiraz Atlas weather unavailable:',lastError);
+    return null;
+  }
+  function registerOfflineSupport(){
+    if(!('serviceWorker' in navigator)||location.protocol!=='https:')return;
+    navigator.serviceWorker.register('./sw.js',{scope:'./'}).then(async reg=>{
+      reg.update().catch(()=>{});
+      await navigator.serviceWorker.ready;
+      // Keep Leaflet's runtime and CSS in the same-device offline cache too.
+      const vendor=['https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js','https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css'];
+      await Promise.allSettled(vendor.map(url=>fetch(url,{mode:'cors',cache:'force-cache'})));
+      console.info('Shiraz Atlas offline cache enabled',reg.scope);
+    }).catch(error=>console.warn('Offline support registration failed:',error));
+  }
   function requestPosition(){return new Promise((resolve,reject)=>{if(!navigator.geolocation)return reject(new Error('مرورگر از موقعیت‌یابی پشتیبانی نمی‌کند.'));navigator.geolocation.getCurrentPosition(p=>resolve({lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy}),e=>reject(new Error(e.code===1?'دسترسی موقعیت مکانی رد شد.':e.code===2?'موقعیت فعلی در دسترس نیست.':'دریافت موقعیت بیش از حد طول کشید.')),{enableHighAccuracy:true,timeout:15000,maximumAge:60000});});}
-  async function locateMe(){try{userLocation=await requestPosition();AtlasMap.showUser(userLocation);AtlasMap.focus(userLocation.lat,userLocation.lng,15);renderPlaces();toast(`موقعیت تو دریافت شد · دقت حدود ${Math.round(userLocation.accuracy||0)} متر`);loadWeather(userLocation.lat,userLocation.lng);}catch(e){toast(e.message,'error');}}
+  async function locateMe(){try{userLocation=await requestPosition();AtlasMap.showUser(userLocation);AtlasMap.focus(userLocation.lat,userLocation.lng,15);renderPlaces();toast(`موقعیت تو دریافت شد · دقت حدود ${Math.round(userLocation.accuracy||0)} متر`);loadWeather(userLocation.lat,userLocation.lng,'موقعیت فعلی شما');}catch(e){toast(e.message,'error');}}
   function randomPlace(){const pool=allPlaces().filter(p=>p.visibility!=='private'&&p.status!=='closed');if(!pool.length){toast('هنوز مکان عمومی برای انتخاب تصادفی ثبت نشده است.','error');return;}const p=pool[Math.floor(Math.random()*pool.length)];selectedPlace=p;AtlasMap.focus(p.lat,p.lng,16);showPlaceToast(p);}
   function showPlaceToast(p){const c=U.categoryById(state.categories,p.categoryId);toast(`✧ مقصد شانسی: ${p.name} · ${c.name}`);}
   function openPlaceForm(place=null){if(!admin)return showModal('login-modal');$('#place-form').reset();$('#place-id').value=place?.id||'';$('#place-modal-title').textContent=place?'ویرایش مکان':'افزودن مکان جدید';$('#place-name').value=place?.name||'';$('#place-category').value=place?.categoryId||state.categories[0]?.id||'';$('#place-status').value=place?.status||'active';$('#place-lat').value=place?.lat??'';$('#place-lng').value=place?.lng??'';$('#place-address').value=place?.address||'';$('#place-description').value=place?.description||'';$('#place-entry-fee').value=place?.entryFee??'';$('#place-estimated-cost').value=place?.estimatedCost??'';$('#place-rating').value=place?.rating??'';$('#place-best-time').value=place?.bestTime||'';$('#place-phone').value=place?.phone||'';$('#place-website').value=place?.website||'';$('#place-tags').value=(place?.tags||[]).join(', ');$('#place-image').value=place?.imageUrl||'';$('#place-notes').value=place?.notes||'';$('#place-public').checked=place?.visibility!=='private';showModal('place-modal');}
@@ -115,7 +248,8 @@
     $$('.modal-backdrop').forEach(back=>back.addEventListener('click',e=>{if(e.target===back){if(back.id==='route-modal'&&drawingActive)cancelDrawing();hideModal(back.id);}}));
     $('#add-place-button').addEventListener('click',()=>openPlaceForm());$('#draw-route-button').addEventListener('click',startDrawing);$('#quick-route').addEventListener('click',startDrawing);$('#journey-add-button').addEventListener('click',startDrawing);
     $('#hero-explore').addEventListener('click',()=>switchView('map'));$('#hero-random').addEventListener('click',randomPlace);$('#quick-random').addEventListener('click',randomPlace);$('#locate-button').addEventListener('click',locateMe);$('#quick-near').addEventListener('click',async()=>{await locateMe();switchView('discover');await discover();});
-    $('#map-layer-toggle').addEventListener('click',()=>{const layer=AtlasMap.toggleLayer();toast(layer==='light'?'نقشه روشن فعال شد.':'نقشه تاریک فعال شد.');});$('#fit-map-button').addEventListener('click',()=>AtlasMap.fit(visiblePlaces()));$('#refresh-button').addEventListener('click',async()=>{try{await loadState();await loadWeather(state.settings?.center?.lat||29.5918,state.settings?.center?.lng||52.5837);toast('اطلاعات به‌روزرسانی شد.');}catch(e){apiError(e);}});
+    $('#map-layer-toggle').addEventListener('click',()=>{const layer=AtlasMap.toggleLayer();toast(layer==='light'?'نقشه روشن فعال شد.':'نقشه تاریک فعال شد.');});
+    $('#weather-refresh').addEventListener('click',()=>{const c=state.settings?.center||{lat:29.5918,lng:52.5837};loadWeather(c.lat,c.lng,'شیراز، ایران',true);});$('#fit-map-button').addEventListener('click',()=>AtlasMap.fit(visiblePlaces()));$('#refresh-button').addEventListener('click',async()=>{try{await loadState();await loadWeather(state.settings?.center?.lat||29.5918,state.settings?.center?.lng||52.5837);toast('اطلاعات به‌روزرسانی شد.');}catch(e){apiError(e);}});
     $('#theme-toggle').addEventListener('click',()=>{document.body.classList.toggle('light-theme');localStorage.setItem('atlas_theme',document.body.classList.contains('light-theme')?'light':'dark');});
     $('#map-search-input').addEventListener('input',e=>{searchText=e.target.value;$('#places-search-input').value=searchText;placePage=1;renderPlaces();});$('#places-search-input').addEventListener('input',e=>{searchText=e.target.value;$('#map-search-input').value=searchText;placePage=1;renderPlaces();});$('#places-sort').addEventListener('change',renderPlaces);$('#visited-filter').addEventListener('change',renderPlaces);$('#clear-filters').addEventListener('click',()=>{categoryFilter='';tagFilter='';searchText='';$('#map-search-input').value='';$('#places-search-input').value='';$('#visited-filter').checked=false;renderAll();});$('#load-more-button').addEventListener('click',()=>{placePage++;renderPlaces();});
     $('#place-grid').addEventListener('click',actionClick);$('#journey-list').addEventListener('click',actionClick);$('#visit-history-list').addEventListener('click',actionClick);$('#discover-grid').addEventListener('click',actionClick);$('#category-manager-list').addEventListener('click',actionClick);$('#tag-manager-list').addEventListener('click',actionClick);
@@ -128,8 +262,9 @@
   }
   async function boot(){
     if(localStorage.getItem('atlas_theme')==='light')document.body.classList.add('light-theme');
+    registerOfflineSupport();
     bind();
-    try{AtlasMap.init({onMapPoint:({count})=>setText('#drawing-count',`${U.fmt(count)} نقطه ثبت شده`),onPlaceSelect:p=>{selectedPlace=p;loadWeather(p.lat,p.lng);}});}catch(e){toast(e.message,'error');}
+    try{AtlasMap.init({onMapPoint:({count})=>setText('#drawing-count',`${U.fmt(count)} نقطه ثبت شده`),onPlaceSelect:p=>{selectedPlace=p;loadWeather(p.lat,p.lng,p.name||'مکان انتخاب‌شده');}});}catch(e){toast(e.message,'error');}
     try{await loadState();}catch(e){apiError(e);$('#place-grid').innerHTML=`<div class="empty-state glass"><span>!</span><h3>اتصال به اطلس برقرار نشد</h3><p>${U.esc(e.message)}<br>آدرس Worker و فایل داده را بررسی کن.</p></div>`;}
     const center=state.settings?.center||{lat:29.5918,lng:52.5837};loadWeather(center.lat,center.lng);
     const p=new URLSearchParams(location.search).get('place');if(p){const target=allPlaces().find(x=>x.id===p);if(target){AtlasMap.focus(target.lat,target.lng);switchView('map');}}

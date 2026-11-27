@@ -42,6 +42,6 @@
   const routeOSMUrl = p => `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${encodeURIComponent(`${p.lat},${p.lng}`)}`;
   const categoryById = (categories,id) => (categories||[]).find(c=>c.id===id) || (categoryDefaults.find(c=>c.id===id)) || {id:'other',name:'سایر',icon:'✦',color:'#7ddac4'};
   const weatherText = code => ({0:'آسمان صاف',1:'عمدتاً صاف',2:'نیمه‌ابری',3:'ابری',45:'مه‌آلود',48:'مه یخ‌زده',51:'نم‌نم باران',53:'باران سبک',55:'باران ریز شدید',61:'باران خفیف',63:'باران متوسط',65:'باران شدید',71:'برف خفیف',73:'برف متوسط',75:'برف شدید',80:'رگبار پراکنده',81:'رگبار متوسط',82:'رگبار شدید',95:'رعدوبرق',96:'رعدوبرق و تگرگ',99:'رعدوبرق شدید'})[code]||'وضعیت نامشخص';
-  const weatherIcon = code => code===0?'☀':code<=3?'⛅':code===45||code===48?'🌫':code>=51&&code<=67?'🌧':code>=71&&code<=77?'❄':code>=80&&code<=82?'🌦':'⛈';
+  const weatherIcon = code => code===0?'☀':code<=3?'⛅':code===45||code===48?'🌫':code>=51&&code<=67?'🌧':(code>=71&&code<=77)||code===85||code===86?'❄':code>=80&&code<=82?'🌦':'⛈';
   window.AtlasUtils={fa,compact,categoryDefaults,defaultTags,esc,fmt,money,date,shortDate,qualityLabel,qualityClass,haversine,distanceLabel,slug,randomId,normalizeDigits,parseCoordinates,routeGoogleUrl,routeOSMUrl,categoryById,weatherText,weatherIcon};
 })();

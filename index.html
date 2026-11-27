@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#07111d">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="description" content="Shiraz Atlas — نقشه شخصی کشف مکان‌ها، برنامه‌ریزی گردش و ثبت مسیرهای شیراز.">
   <meta property="og:title" content="Shiraz Atlas | اطلس گشت‌وگذار شیراز">
   <meta property="og:description" content="مکان‌ها را کشف کن، مسیرهایت را ثبت کن و نقشه شخصی شیرازت را بساز.">
@@ -90,11 +91,25 @@
 
       <div class="content-grid">
         <aside class="sidebar-column">
-          <section class="side-card glass weather-card">
-            <div class="card-heading"><div><span class="mini-kicker">SHIRAZ WEATHER</span><h3>هوای همین حوالی</h3></div><span class="weather-symbol" id="weather-icon">☀</span></div>
-            <div class="weather-main"><strong id="weather-temp">—°</strong><div><b id="weather-desc">در حال دریافت...</b><small id="weather-feels">احساس واقعی —</small></div></div>
-            <div class="weather-details"><span>💧 <b id="weather-humidity">—</b><small>رطوبت</small></span><span>↗ <b id="weather-wind">—</b><small>باد</small></span><span>☂ <b id="weather-rain">—</b><small>بارش</small></span></div>
-            <div class="weather-footer"><span id="weather-location">شیراز، ایران</span><a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Weather by Open-Meteo ↗</a></div>
+          <section class="side-card glass weather-card weather-loading" id="weather-card" data-weather="loading">
+            <div class="weather-aura" aria-hidden="true"></div>
+            <div class="card-heading weather-heading">
+              <div><span class="mini-kicker">SHIRAZ WEATHER · LIVE</span><h3>هوای همین حوالی</h3></div>
+              <div class="weather-head-actions"><span class="weather-special" id="weather-special">در حال بررسی آسمان</span><button class="weather-refresh" type="button" id="weather-refresh" title="به‌روزرسانی آب‌وهوا" aria-label="به‌روزرسانی آب‌وهوا">↻</button></div>
+            </div>
+            <div class="weather-main">
+              <span class="weather-symbol" id="weather-icon" aria-hidden="true">⛅</span>
+              <strong id="weather-temp">—°</strong>
+              <div><b id="weather-desc">در حال دریافت دادهٔ هواشناسی…</b><small id="weather-feels">احساس واقعی —</small></div>
+            </div>
+            <div class="weather-details">
+              <span><i>💧</i><b id="weather-humidity">—</b><small>رطوبت</small></span>
+              <span><i>💨</i><b id="weather-wind">—</b><small>سرعت باد</small></span>
+              <span><i>🌧️</i><b id="weather-rain">—</b><small>بارش فعلی</small></span>
+            </div>
+            <div class="weather-forecast-head"><b>پیش‌بینی سه‌روزه</b><small id="weather-updated">در انتظار دریافت اطلاعات</small></div>
+            <div class="weather-forecast" id="weather-forecast"><div class="weather-forecast-empty">پیش‌بینی هوا پس از دریافت داده نمایش داده می‌شود.</div></div>
+            <div class="weather-footer"><span id="weather-location">شیراز، ایران</span><a href="https://open-meteo.com/" target="_blank" rel="noreferrer">داده‌ها: Open-Meteo ↗</a></div>
           </section>
 
           <section class="side-card glass quick-card">
@@ -125,7 +140,7 @@
             </div>
             <div class="map-toolbar glass"><div class="map-search"><span>⌕</span><input id="map-search-input" type="search" placeholder="جست‌وجوی نام مکان، محله یا برچسب..." autocomplete="off"><kbd>/</kbd></div><div class="map-toolbar-right"><span class="map-legend"><i class="legend-dot saved"></i> مکان‌ها</span><span class="map-legend"><i class="legend-line visited"></i> مسیرهای بازدید</span><span class="map-legend"><i class="legend-dot me"></i> موقعیت من</span></div></div>
             <div class="map-frame glass"><div id="atlas-map" role="application" aria-label="نقشه تعاملی شیراز"></div><div class="map-corner-label"><span class="pulse-dot"></span> LIVE ATLAS <small>SHIRAZ / IR</small></div><div class="map-zoom-hint">برای افزودن نقطه در حالت ثبت مسیر، روی نقشه کلیک کن</div><div class="map-drawing-bar hidden" id="map-drawing-bar"><span id="drawing-count">۰ نقطه ثبت شده</span><button id="gps-point-button">＋ یک نقطه GPS</button><button id="gps-track-button">◉ شروع GPS زنده</button><button id="finish-drawing-button" class="button-primary">پایان و ذخیره</button><button id="cancel-drawing-button">لغو</button></div></div>
-            <div class="map-footer"><span><b id="map-visible-count">۰</b> مکان قابل نمایش</span><span>نقشه و داده‌های جغرافیایی © OpenStreetMap contributors</span><button class="text-button" id="fit-map-button">نمایش همه مکان‌ها ⤢</button></div>
+            <div class="map-footer"><span><b id="map-visible-count">۰</b> مکان قابل نمایش</span><span id="map-status" data-state="loading">در حال آماده‌سازی نقشه…</span><span class="map-license">© OpenStreetMap contributors · OpenTopoMap fallback</span><button class="text-button" id="fit-map-button">نمایش همه مکان‌ها ⤢</button></div>
           </section>
 
           <section class="section-block places-section" id="places-section">

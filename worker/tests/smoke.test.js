@@ -167,3 +167,43 @@ test('Shiraz Atlas API privacy, admin auth, mutations and Telegram webhook', asy
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test('Weather API exposes current conditions and a three-day forecast', async () => {
+  const originalFetch = globalThis.fetch;
+  const upstream = {
+    current: {
+      temperature_2m: 24.5, relative_humidity_2m: 31, apparent_temperature: 24.1,
+      is_day: 1, precipitation: 0, weather_code: 1, wind_speed_10m: 8.2
+    },
+    daily: {
+      time: ['2026-11-27', '2026-11-28', '2026-11-29'],
+      weather_code: [1, 3, 61],
+      temperature_2m_max: [26, 24, 21],
+      temperature_2m_min: [12, 11, 10],
+      precipitation_probability_max: [0, 5, 55]
+    },
+    timezone: 'Asia/Tehran'
+  };
+  globalThis.fetch = async input => {
+    const url = new URL(String(input));
+    assert.equal(url.hostname, 'api.open-meteo.com');
+    assert.ok(url.searchParams.get('current').includes('temperature_2m'));
+    assert.ok(url.searchParams.get('daily').includes('precipitation_probability_max'));
+    return new Response(JSON.stringify(upstream), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const env = { SITE_ORIGIN: 'https://mehrdadmb2.github.io', ALLOWED_ORIGINS: 'https://mehrdadmb2.github.io' };
+    const response = await worker.fetch(new Request('https://worker.test/api/weather?lat=29.5918&lng=52.5837', {
+      headers: { Origin: 'https://mehrdadmb2.github.io' }
+    }), env, {});
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('access-control-allow-origin'), 'https://mehrdadmb2.github.io');
+    assert.match(response.headers.get('cache-control') || '', /s-maxage=900/);
+    const payload = await response.json();
+    assert.equal(payload.current.temperature_2m, 24.5);
+    assert.equal(payload.daily.time.length, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

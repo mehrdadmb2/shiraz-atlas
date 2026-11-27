@@ -1,4 +1,4 @@
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const MAX_DATA_BYTES = 850 * 1024; // keep margin below GitHub Contents API's 1 MiB response boundary
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -499,14 +499,50 @@ async function weatherFor(url) {
   const lat = number(url.searchParams.get('lat'), -90, 90), lng = number(url.searchParams.get('lng'), -180, 180);
   if (lat === null || lng === null) return json({ error: 'مختصات هواشناسی معتبر نیست.' }, 400);
   const target = new URL('https://api.open-meteo.com/v1/forecast');
-  target.search = new URLSearchParams({ latitude: String(lat), longitude: String(lng), current: 'temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m', daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max', timezone: 'auto', forecast_days: '3' }).toString();
+  target.search = new URLSearchParams({
+    latitude: String(lat), longitude: String(lng),
+    current: 'temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m',
+    daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max',
+    timezone: 'auto', forecast_days: '3'
+  }).toString();
+  const cacheKey = new Request(target.toString(), { method: 'GET' });
+  const edgeCache = globalThis.caches?.default;
   try {
-    const response = await fetch(target, { headers: { 'user-agent': 'ShirazAtlas/1.0 (+https://github.com/mehrdadmb2/shiraz-atlas)' }, signal: AbortSignal.timeout(12000) });
+    if (edgeCache) {
+      const cached = await edgeCache.match(cacheKey);
+      if (cached) {
+        const headers = new Headers(cached.headers);
+        headers.set('x-atlas-weather-cache', 'HIT');
+        return new Response(cached.body, { status: cached.status, headers });
+      }
+    }
+  } catch (error) { console.warn('Weather edge-cache read failed:', error?.message || error); }
+  try {
+    const response = await fetch(target, {
+      headers: { 'user-agent': 'ShirazAtlas/1.2 (+https://github.com/mehrdadmb2/shiraz-atlas)' },
+      signal: AbortSignal.timeout(12000)
+    });
     if (!response.ok) return json({ error: `سرویس هواشناسی پاسخ ${response.status} داد.` }, 502);
-    return new Response(await response.text(), { status: 200, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=900', ...corsHeadersFromUrl(url) } });
-  } catch { return json({ error: 'دریافت وضعیت هوا ممکن نشد.' }, 502); }
+    const payload = await response.text();
+    // Detect upstream error pages before they are cached as valid weather data.
+    const parsed = JSON.parse(payload);
+    if (!parsed?.current || !Array.isArray(parsed?.daily?.time)) return json({ error: 'ساختار پاسخ هواشناسی معتبر نیست.' }, 502);
+    const result = new Response(payload, {
+      status: 200,
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'cache-control': 'public, max-age=300, s-maxage=900, stale-while-revalidate=1800',
+        'x-atlas-weather-cache': 'MISS'
+      }
+    });
+    try { if (edgeCache) await edgeCache.put(cacheKey, result.clone()); }
+    catch (error) { console.warn('Weather edge-cache write failed:', error?.message || error); }
+    return result;
+  } catch (error) {
+    console.warn('Weather upstream request failed:', error?.message || error);
+    return json({ error: 'دریافت وضعیت هوا ممکن نشد.' }, 502);
+  }
 }
-function corsHeadersFromUrl() { return {}; }
 
 async function telegramCall(env, method, payload) {
   if (!env.TELEGRAM_BOT_TOKEN) throw new Error('TELEGRAM_BOT_TOKEN تنظیم نشده است.');
