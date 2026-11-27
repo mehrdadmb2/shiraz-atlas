@@ -97,6 +97,12 @@ test('Shiraz Atlas API privacy, admin auth, mutations and Telegram webhook', asy
     assert.equal(adminState.visits.length, 1);
     assert.equal(adminState.routes.length, 2);
 
+    response = await call('/api/admin/diagnostics', { headers: { Authorization: `Bearer ${session.token}` } });
+    assert.equal(response.status, 200, 'authenticated diagnostics endpoint should respond');
+    const diagnostics = await response.json();
+    assert.ok(diagnostics.checks.some(x => x.name === 'Private data repository'));
+    assert.ok(diagnostics.checks.some(x => x.name === 'GitHub Pages website'));
+
     const mutate = (action, payload) => call('/api/admin/mutate', {
       method: 'POST',
       headers: { 'content-type': 'application/json', Authorization: `Bearer ${session.token}`, Origin: 'https://mehrdadmb2.github.io' },
@@ -137,10 +143,25 @@ test('Shiraz Atlas API privacy, admin auth, mutations and Telegram webhook', asy
     assert.equal(response.status, 200);
     assert.equal(data.places.length, 5, 'DMS coordinate message should create a place');
 
+    const ownerAdd = { update_id: 1001, message: { message_id: 3, from: { id: 12345 }, chat: { id: 12345 }, text: '/adminadd 54321' } };
+    response = await call('/telegram/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' }, body: JSON.stringify(ownerAdd) });
+    assert.equal(response.status, 200);
+    assert.ok(data.meta.telegramAdmins.includes('54321'), 'owner can delegate admin access without code changes');
+
+    const delegatedAdmin = { update_id: 1002, message: { message_id: 4, from: { id: 54321 }, chat: { id: 54321 }, text: '29.733000, 52.510000' } };
+    response = await call('/telegram/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' }, body: JSON.stringify(delegatedAdmin) });
+    assert.equal(response.status, 200);
+    assert.equal(data.places.length, 6, 'delegated admin can create places');
+
+    const ownerRemove = { update_id: 1003, message: { message_id: 5, from: { id: 12345 }, chat: { id: 12345 }, text: '/adminremove 54321' } };
+    response = await call('/telegram/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': 'test-webhook-secret' }, body: JSON.stringify(ownerRemove) });
+    assert.equal(response.status, 200);
+    assert.ok(!data.meta.telegramAdmins.includes('54321'), 'owner can revoke delegated admin access');
+
     response = await call('/telegram/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': 'wrong' }, body: '{}' });
     assert.equal(response.status, 403, 'invalid webhook secret must be rejected');
 
-    assert.ok(writes >= 4);
+    assert.ok(writes >= 7);
     assert.ok(telegramCalls.length >= 2);
   } finally {
     globalThis.fetch = originalFetch;

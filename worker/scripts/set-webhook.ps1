@@ -63,7 +63,11 @@ $commands = @(
     @{ command = 'route'; description = 'ثبت مسیر (فقط ادمین)' },
     @{ command = 'stats'; description = 'آمار خصوصی اطلس (فقط ادمین)' },
     @{ command = 'categoryadd'; description = 'افزودن دسته‌بندی (فقط ادمین)' },
-    @{ command = 'tagadd'; description = 'افزودن برچسب (فقط ادمین)' }
+    @{ command = 'tagadd'; description = 'افزودن برچسب (فقط ادمین)' },
+    @{ command = 'test'; description = 'تست سلامت پروژه (ادمین)' },
+    @{ command = 'admins'; description = 'فهرست ادمین‌ها (مالک)' },
+    @{ command = 'adminadd'; description = 'افزودن ادمین (مالک)' },
+    @{ command = 'adminremove'; description = 'حذف ادمین (مالک)' }
 )
 
 $webhookBody = @{

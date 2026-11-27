@@ -37,7 +37,7 @@ Write-Host 'Sensitive values are entered as secure prompts and are not saved in 
 
 $telegramToken = Read-SecretValue 'Enter the Telegram BotFather token'
 $githubToken = Read-SecretValue 'Enter the GitHub Fine-grained token (Contents read/write on private shiraz-atlas-data only)'
-$adminIds = Read-Host 'Enter Telegram numeric admin IDs separated by commas. Leave blank to configure later.'
+$adminIds = Read-Host 'Enter Telegram numeric admin IDs separated by commas. The first ID becomes the owner.'
 $adminPassword = Read-SecretValue 'Enter the website admin password (any non-empty length and characters)'
 
 if ([string]::IsNullOrWhiteSpace($telegramToken)) { throw 'Telegram bot token cannot be empty.' }
@@ -45,8 +45,7 @@ if ([string]::IsNullOrWhiteSpace($githubToken)) { throw 'GitHub token cannot be 
 if ([string]::IsNullOrWhiteSpace($adminPassword)) { throw 'Website admin password cannot be empty.' }
 
 if ([string]::IsNullOrWhiteSpace($adminIds)) {
-    $adminIds = '0'
-    Write-Warning 'No Telegram admin ID supplied. Admin ID is temporarily set to 0. After webhook setup, send /myid to the bot and configure the real ID.'
+    throw 'Enter at least one real numeric Telegram admin ID. The first ID becomes the owner.'
 }
 if ($adminIds -notmatch '^\s*\d+(\s*[,; ]\s*\d+)*\s*$') {
     throw 'TELEGRAM_ADMIN_IDS must contain numeric IDs separated by commas, semicolons, or spaces.'
@@ -64,6 +63,8 @@ try {
     Set-WranglerSecret 'TELEGRAM_BOT_TOKEN' $telegramToken
     Set-WranglerSecret 'GITHUB_TOKEN' $githubToken
     Set-WranglerSecret 'TELEGRAM_ADMIN_IDS' ($adminIds -replace '[; ]+', ',')
+    $ownerId = ($adminIds -split '[,; ]+' | Where-Object { $_ } | Select-Object -First 1)
+    if ($ownerId) { Set-WranglerSecret 'TELEGRAM_OWNER_ID' $ownerId }
     Set-WranglerSecret 'WEB_ADMIN_PASSWORD' $adminPassword
 
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()

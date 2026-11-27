@@ -109,7 +109,7 @@
   }
   function bind(){
     $$('[data-view]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
-    $('#auth-button').addEventListener('click',()=>admin?logout():showModal('login-modal'));
+    $('#auth-button').addEventListener('click',()=>admin?logout():showModal('login-modal'));$('#diagnostics-button').addEventListener('click',async()=>{try{const report=await API.diagnostics();const lines=report.checks.map(x=>`${x.ok?'✅':'❌'} ${x.name}: ${x.detail}`).join('\\n');alert(`Shiraz Atlas · ${report.checks.filter(x=>x.ok).length}/${report.checks.length} checks passed\\n\\n${lines}\\n\\nبرای لاگ زنده: Cloudflare Worker → Logs / Observability یا npx wrangler tail`);}catch(e){apiError(e);}});
     $('#login-form').addEventListener('submit',login);$('#place-form').addEventListener('submit',savePlace);$('#visit-form').addEventListener('submit',saveVisit);$('#route-form').addEventListener('submit',saveRoute);$('#category-form').addEventListener('submit',addCategory);$('#tag-form').addEventListener('submit',addTag);$('#bounds-form').addEventListener('submit',saveBounds);
     $$('.modal-close,[data-close]').forEach(b=>b.addEventListener('click',()=>{const id=b.dataset.close||b.closest('.modal-backdrop')?.id;if(id==='route-modal'&&drawingActive)cancelDrawing();hideModal(id);}));
     $$('.modal-backdrop').forEach(back=>back.addEventListener('click',e=>{if(e.target===back){if(back.id==='route-modal'&&drawingActive)cancelDrawing();hideModal(back.id);}}));

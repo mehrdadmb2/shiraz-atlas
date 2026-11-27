@@ -12,3 +12,18 @@
 @media(max-width:600px){.visit-history-item{align-items:flex-start;flex-wrap:wrap}.visit-history-actions{width:100%;justify-content:flex-end}.bounds-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 .place-extra-meta{display:flex;flex-wrap:wrap;gap:5px 12px;color:var(--muted-2);font-size:9px;line-height:1.8}.place-contact{display:flex;gap:12px;font-size:9px}.place-contact a{color:var(--teal);font-weight:700}.place-contact a:hover{text-decoration:underline}
+
+/* Shiraz Atlas 1.1 — refined motion, depth and accessibility */
+:root{--atlas-glow:rgba(77,224,193,.22);--atlas-line:rgba(112,210,220,.16)}
+body:before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(circle at 50% 0%,rgba(75,220,195,.075),transparent 38%),linear-gradient(115deg,transparent 48%,rgba(89,201,238,.025) 50%,transparent 52%);background-size:auto,46px 46px;opacity:.8}
+.glass,.place-card,.journey-item,.stat-card,.modal{transition:transform .28s cubic-bezier(.2,.8,.2,1),border-color .28s,box-shadow .28s,background .28s}
+.glass:hover,.place-card:hover,.journey-item:hover{border-color:rgba(77,224,193,.3);box-shadow:0 24px 75px rgba(0,0,0,.34),0 0 0 1px rgba(77,224,193,.045);transform:translateY(-3px)}
+button,.button,.filter-chip,.tag-chip{transition:transform .18s ease,filter .18s ease,box-shadow .18s ease}
+button:hover,.button:hover{filter:brightness(1.08);transform:translateY(-1px)}
+button:active,.button:active{transform:translateY(0) scale(.985)}
+:focus-visible{outline:2px solid var(--teal);outline-offset:3px}
+.section-heading h2 em{ text-shadow:0 0 24px var(--atlas-glow)}
+.place-card{overflow:hidden;backdrop-filter:blur(18px)}
+.place-visual img{transition:transform .65s cubic-bezier(.2,.7,.2,1),filter .4s}
+.place-card:hover .place-visual img{transform:scale(1.055);filter:saturate(1.12)}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}

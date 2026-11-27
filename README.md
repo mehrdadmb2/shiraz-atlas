@@ -1,136 +1,147 @@
 <div align="center">
-  <img src="assets/atlas-avatar.png" width="100" alt="Shiraz Atlas logo">
-  <h1>Shiraz Atlas</h1>
-  <p><b>اطلس شخصی گشت‌وگذار شیراز</b></p>
-  <p>Discover Shiraz. Save places. Trace every journey.</p>
-  <img src="assets/atlas-banner.png" alt="Shiraz Atlas banner" width="100%">
+  <img src="assets/atlas-avatar.png" width="104" alt="Shiraz Atlas logo">
+  <h1>🧭 Shiraz Atlas</h1>
+  <p><strong>اطلس هوشمند گشت‌وگذار، کشف مکان‌ها و ثبت مسیرهای شیراز</strong></p>
+  <p>Discover places · Plan escapes · Remember every route</p>
+  <img src="assets/atlas-banner.png" width="100%" alt="Shiraz Atlas banner">
   <p>
-    <a href="https://mehrdadmb2.github.io/shiraz-atlas/">🌐 Website</a> ·
-    <a href="https://t.me/ShirazAtlasBot">🤖 Telegram Bot</a> ·
-    <a href="https://shiraz-atlas.game-developer-mb.workers.dev/api/health">☁️ API Health</a>
+    <a href="https://mehrdadmb2.github.io/shiraz-atlas/"><img src="https://img.shields.io/badge/🌐_Live-GitHub_Pages-16b99d?style=for-the-badge" alt="Live site"></a>
+    <a href="https://t.me/ShirazAtlasBot"><img src="https://img.shields.io/badge/🤖_Telegram-ShirazAtlasBot-229ED9?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram"></a>
+    <a href="https://shiraz-atlas.game-developer-mb.workers.dev/api/health"><img src="https://img.shields.io/website?url=https%3A%2F%2Fshiraz-atlas.game-developer-mb.workers.dev%2Fapi%2Fhealth&label=API%20health&style=for-the-badge" alt="API health"></a>
+  </p>
+  <p>
+    <img src="https://img.shields.io/badge/Version-1.1.0-8b7cff?style=flat-square">
+    <img src="https://img.shields.io/badge/Frontend-GitHub%20Pages-181717?style=flat-square&logo=github">
+    <img src="https://img.shields.io/badge/API-Cloudflare%20Workers-F38020?style=flat-square&logo=cloudflare">
+    <img src="https://img.shields.io/badge/Map-Leaflet%20%2B%20OSM-72b85a?style=flat-square">
+    <img src="https://img.shields.io/badge/Bot-Telegram-229ED9?style=flat-square&logo=telegram">
+    <img src="https://img.shields.io/badge/Data-Private%20GitHub%20Repo-16a34a?style=flat-square&logo=github">
+    <img src="https://img.shields.io/badge/License-MIT-blue?style=flat-square">
   </p>
 </div>
 
 ---
 
-## درباره پروژه
+## ✨ Overview
 
-**Shiraz Atlas** یک اطلس شخصی و نقشه‌محور برای کشف مکان‌ها، نگه‌داری مقصدهای موردعلاقه، برنامه‌ریزی گردش و ثبت تاریخچه بازدید و مسیرهای پیموده‌شده است. سایت روی GitHub Pages اجرا می‌شود؛ Cloudflare Worker تمام عملیات API و ربات تلگرام را مدیریت می‌کند و اطلاعات اصلی در یک فایل JSON داخل ریپوی خصوصی GitHub ذخیره می‌شوند.
+**Shiraz Atlas** is a map-first personal discovery and trip journal for Shiraz, Iran. Save favorite places, organize them with categories and flexible tags, explore nearby spots, estimate routes, record visits, and visualize your exploration footprint.
 
-### امکانات نسخه 1.0
+The public GitHub Pages frontend talks to a Cloudflare Worker. The Worker is the only trusted gateway to the private data repository and Telegram Bot API.
 
-- نقشه تعاملی شیراز با نشانگر مکان‌ها، فیلتر دسته‌بندی و برچسب و نقشه روشن/تاریک.
-- ثبت مکان از سایت یا ربات با مختصات اعشاری، DMS و لینک‌های متداول نقشه.
-- اطلاعات قابل ویرایش: نام، دسته‌بندی، توضیحات، آدرس، ورودی، هزینه تقریبی، امتیاز، بهترین زمان مراجعه، تلفن، وب‌سایت، تصویر، برچسب و یادداشت خصوصی.
-- برچسب‌های مستقل و قابل تنظیم؛ مقادیر اولیه `دوستانه`، `پشتو`، `تاریک` و `Skybit`.
-- ثبت بازدید با ارزیابی خوب، نرمال یا بد و یادداشت شخصی.
-- ترسیم مسیر روی نقشه یا ضبط نقطه‌های GPS تا وقتی صفحه باز است؛ ثبت نوع حرکت، کیفیت و توضیحات.
-- نمایش مسیرهای ثبت‌شده روی نقشه و محاسبه تخمینی پوشش شبکه‌ای محدوده گشت.
-- نمایش فاصله مستقیم از موقعیت فعلی و پیش‌نمایش مسیر رانندگی با مسافت و زمان تخمینی؛ مسیریابی زنده و ترافیک از طریق Google Maps.
-- پیشنهاد مکان‌های نزدیک از OpenStreetMap با جست‌وجوی دستی و شعاع قابل انتخاب.
-- هواشناسی مقصد از Open-Meteo.
-- انتخاب مقصد تصادفی با فیلتر دسته‌بندی/برچسب.
-- کنترل دسترسی سایت با رمز ادمین و کنترل دسترسی ربات با شناسه عددی تلگرام.
-- تلاش مجدد محدود هنگام تداخل نوشتن هم‌زمان در فایل GitHub و ثبت تاریخچه تغییرات در commitها.
+## 🚀 Features
 
-## معماری
+| Module | Capabilities |
+|---|---|
+| 🗺️ Interactive atlas | Leaflet map, place markers, route overlays, category/tag filters |
+| 📍 Place library | Create, edit, delete, coordinates, images, entry fees, estimated costs, ratings and notes |
+| 🏷️ Organization | Editable categories and independent tags; starter tags include دوستانه، پشتو، تاریک، Skybit |
+| 🧭 Route journal | Route coordinates, distance estimate, travel mode, quality and private notes |
+| ✅ Visit journal | Visit history, date, quality, duration and private notes |
+| 📊 Exploration analytics | Visit totals, route distance and approximate grid coverage |
+| 🎲 Discovery | Random destination, nearby OpenStreetMap discovery and search |
+| 🌤️ Context | Destination weather and route preview |
+| 🤖 Telegram UX | Inline keyboards, quick actions, location sharing, admin menu and command shortcuts |
+| 👥 Admin delegation | Owner can add/remove Telegram admins from the bot without editing code |
+| 🧪 Diagnostics | `/test` and authenticated `/api/admin/diagnostics` inspect Worker configuration, private GitHub data and Telegram webhook |
+| 🔐 Privacy | Website admin sessions, Telegram numeric-ID authorization, private-by-default trips and data isolation |
 
-```text
-GitHub Pages (public static frontend)
-              │ HTTPS / JSON API
-              ▼
-Cloudflare Worker (API + Telegram webhook)
-       │                     │
-       ▼                     ▼
-Private GitHub repo      Telegram Bot
-shiraz-atlas-data        @ShirazAtlasBot
-       │
-       └── atlas.json (single source of truth)
-```
-
-**مهم:** ریپوی فعلی `mehrdadmb2/shiraz-atlas` عمومی است. مسیرهای شخصی و تاریخچه بازدید نباید در آن قرار بگیرند. فایل `atlas.json` را فقط در ریپوی خصوصی `mehrdadmb2/shiraz-atlas-data` قرار بده. Worker تنها بخش واسطی است که با GitHub Token به آن ریپو دسترسی دارد.
-
-## ساختار فایل‌ها
+## 🧩 Architecture
 
 ```text
-shiraz-atlas/
-├── index.html
-├── assets/
-│   ├── atlas-avatar.png
-│   ├── atlas-banner.png
-│   ├── atlas-mark.svg
-│   └── atlas-banner.svg
-├── css/styles.css
-├── js/
-│   ├── config.js
-│   ├── utils.js
-│   ├── api.js
-│   ├── map.js
-│   └── app.js
-├── docs/
-│   ├── DEPLOYMENT_FA.md
-│   ├── BOT_SETUP_FA.md
-│   └── DATA_SCHEMA.md
-├── .github/workflows/pages.yml
-├── worker/
-│   ├── wrangler.toml
-│   ├── package.json
-│   ├── README.md
-│   ├── src/index.js
-│   ├── tests/smoke.test.js
-│   └── scripts/
-│       ├── deploy.ps1
-│       ├── set-secrets.ps1
-│       └── set-webhook.ps1
-├── botfather-commands.txt
-└── README.md
+GitHub Pages (public frontend)
+          │ HTTPS / JSON
+          ▼
+Cloudflare Worker ───────── Telegram Bot API
+          │                 @ShirazAtlasBot
+          ▼
+Private GitHub repository
+mehrdadmb2/shiraz-atlas-data
+          └── atlas.json
 ```
 
-فایل seed خصوصی در بسته جداگانه‌ای با نام `Shiraz-Atlas-Private-Data-Seed.zip` تحویل داده می‌شود؛ آن را به ریپوی عمومی اضافه نکن.
+- **Public repository:** `mehrdadmb2/shiraz-atlas` — frontend, Worker source, docs and workflows.
+- **Private repository:** `mehrdadmb2/shiraz-atlas-data` — actual place and personal trip data.
+- **Cloudflare Worker:** API, authentication, GitHub data access and Telegram webhook.
 
-## شروع سریع
+Never commit private data, access tokens, bot tokens, admin passwords or session secrets to the public repository.
 
-راهنمای کامل ویندوز، GitHub Pages، ساخت ریپوی خصوصی، Fine-grained PAT، نصب Worker، Secretها و Webhook در [docs/DEPLOYMENT_FA.md](docs/DEPLOYMENT_FA.md) قرار دارد. راهنمای تنظیم نام، توضیحات و عکس ربات در [docs/BOT_SETUP_FA.md](docs/BOT_SETUP_FA.md) و جزئیات مدل داده در [docs/DATA_SCHEMA.md](docs/DATA_SCHEMA.md) است.
+## 🤖 Telegram quick start
 
-برای تست محلی Worker و سناریوهای حریم خصوصی/احراز هویت: وارد پوشه `worker` شو، `npm install` و سپس `npm test` را اجرا کن. این تست از Mockهای GitHub و Telegram استفاده می‌کند و توکن واقعی لازم ندارد.
+Open [@ShirazAtlasBot](https://t.me/ShirazAtlasBot) and send `/start`. Use the inline buttons for places, random destination, categories, weather and the admin panel.
 
-### آدرس‌ها
+### Commands
 
-- Repository: https://github.com/mehrdadmb2/shiraz-atlas
-- Pages: https://mehrdadmb2.github.io/shiraz-atlas/
-- Worker API: https://shiraz-atlas.game-developer-mb.workers.dev
-- Telegram: https://t.me/ShirazAtlasBot
+| Command | Description |
+|---|---|
+| `/start` | 🧭 Main menu with inline buttons |
+| `/help` | 📚 Persian help |
+| `/myid` | 🪪 Numeric Telegram ID |
+| `/places` / `/search` | 📍 Browse and search places |
+| `/random` | 🎲 Random destination; optional category/tag |
+| `/near lat,lng` | 📌 Nearby saved places |
+| `/categories` / `/weather` | 🗂 Categories and 🌤 weather |
+| `/add` / `/edit` / `/delete` | 🔐 Place administration |
+| `/visit` / `/route` | ✅ Record visits and routes |
+| `/stats` | 📊 Private statistics |
+| `/test` | 🧪 Service health checks |
+| `/admins` / `/adminadd` / `/adminremove` | 👑 Owner-only admin management |
 
-### Endpointهای Worker
+Send a Telegram Location or coordinates such as `29.722356, 52.470975` or DMS coordinates to quickly save a place (admins only). Full Persian command reference: [`botfather-commands.txt`](botfather-commands.txt).
 
-| Method | Endpoint | کاربرد |
-|---|---|---|
-| GET | `/api/health` | وضعیت Worker و تنظیمات ضروری |
-| GET | `/api/state` | داده عمومی و مکان‌های عمومی |
-| GET | `/api/admin/state` | تمام داده‌ها با نشست ادمین |
-| POST | `/api/auth/login` | ورود با رمز ادمین سایت |
-| POST | `/api/auth/logout` | خروج سمت کلاینت |
-| POST | `/api/admin/mutate` | عملیات نوشتن/ویرایش/حذف با نشست معتبر |
-| GET | `/api/discover?lat=...&lng=...&radius=3000` | کشف مکان‌های اطراف از OSM |
-| GET | `/api/weather?lat=...&lng=...` | هواشناسی مختصات |
-| GET | `/api/route?fromLat=...&fromLng=...&toLat=...&toLng=...&mode=driving` | پیش‌نمایش مسیر خودرو |
-| POST | `/telegram/webhook` | دریافت Updateهای تلگرام با secret header |
+### Admin delegation
 
-## حریم خصوصی و محدودیت‌ها
+The first ID in `TELEGRAM_ADMIN_IDS` is treated as the owner unless `TELEGRAM_OWNER_ID` is explicitly set. The owner can use:
 
-- مکان‌هایی که `visibility: "private"` دارند فقط در نشست ادمین نمایش داده می‌شوند.
-- مسیرها و بازدیدها به‌صورت پیش‌فرض خصوصی هستند؛ فقط مسیرهایی که ادمین صراحتاً عمومی کند روی نقشه عمومی نمایش داده می‌شوند و یادداشت شخصی آن‌ها حذف می‌شود. تاریخچه بازدید همچنان خصوصی است.
-- رمز سایت، توکن ربات، GitHub PAT، فهرست ادمین‌ها، کلید نشست و secret وب‌هوک فقط در Cloudflare Secrets نگه‌داری می‌شوند.
-- فایل داده در هر تغییر با GitHub Contents API ذخیره می‌شود؛ مناسب استفاده شخصی و تعداد کم مدیران است، نه ثبت GPS پرتعداد یا نوشتن هم‌زمان گسترده. برای توسعه پرترافیک، مهاجرت داده‌ها به Cloudflare D1/SQLite پیشنهاد می‌شود. در این نسخه برای جلوگیری از رسیدن به محدودیت دریافت محتوای GitHub، سقف عملیاتی فایل ۸۵۰ کیلوبایت است و Worker قبل از نوشتن آن را کنترل می‌کند.
-- محدوده فعلی «پوشش گشت» یک محدوده شبکه‌ای قابل تنظیم است و مرز رسمی شهرداری شیراز نیست؛ درصد آن تخمینی است.
-- پیش‌نمایش مسیر داخل نقشه در این نسخه برای خودرو و متکی به سرور عمومی OSRM است. برای پیاده‌روی/دوچرخه و مسیریابی با ترافیک زنده، لینک Google Maps باز می‌شود.
-- داده‌های OpenStreetMap ممکن است ناقص یا قدیمی باشند؛ ساعت کاری، قیمت و وضعیت باز بودن از روی OSM تضمین نمی‌شود.
+```text
+/admins
+/adminadd 123456789
+/adminremove 123456789
+```
 
-## منابع و مجوزها
+A delegated admin is stored in `meta.telegramAdmins` in the private `atlas.json`. Bootstrap IDs configured in `TELEGRAM_ADMIN_IDS` are not removable through bot commands; change that secret deliberately if needed. Only the owner can delegate access.
 
-- Leaflet 1.9.4 برای نقشه؛ OpenStreetMap و CARTO برای کاشی‌های نقشه.
-- کشف مکان‌ها از OpenStreetMap/Overpass؛ استفاده محدود و درخواستی، بدون دانلود انبوه.
-- هواشناسی از Open-Meteo؛ استفاده رایگان آن برای استفاده غیرتجاری و با انتساب منبع است.
-- مسیر خودرو از نمونه عمومی OSRM؛ سرویس best-effort است و برای ترافیک لحظه‌ای مناسب نیست.
+## 🧪 Diagnostics and logs
 
-کد پروژه با MIT License ارائه می‌شود. مجوز داده‌های نقشه و سرویس‌های بیرونی مستقل است؛ انتساب منبع باید حفظ شود.
+- Telegram: send `/test` or tap **🧪 تست سلامت پروژه**.
+- Website/API: after admin login, request `GET /api/admin/diagnostics` with the session Bearer token.
+- Worker logs: Cloudflare Dashboard → Workers & Pages → `shiraz-atlas` → **Logs / Observability**. Use `npx wrangler tail` for live logs.
+- GitHub Pages deployment: repository → Actions → `Deploy Shiraz Atlas to GitHub Pages`.
+- Private data health: diagnostics verifies the Worker can read and parse `atlas.json`; it does not perform a destructive write test.
+- GitHub Actions workflow run details are not queried because the data token is intentionally scoped to the private data repository only. Check Actions run logs in GitHub UI.
+
+## 🛠️ Deployment
+
+See [`docs/DEPLOYMENT_FA.md`](docs/DEPLOYMENT_FA.md) for complete Windows PowerShell 5.1 steps, GitHub Fine-grained Token permissions, Cloudflare secrets, Wrangler deployment and webhook setup.
+
+Useful commands from `worker/`:
+
+```powershell
+npm install
+npm test
+npx wrangler login
+npx wrangler deploy --config .\wrangler.toml
+npx wrangler tail --format pretty
+.\scripts\set-webhook.ps1
+```
+
+## 🔒 Security and limitations
+
+- Website writes require a signed, expiring admin session; the password and signing secret stay in Cloudflare.
+- Telegram authorization uses numeric `from.id`, never the mutable username.
+- Admin delegation is owner-only. The first bootstrap admin is the owner by default.
+- Private places, visit notes and private routes are excluded from public API responses.
+- The single JSON file is suitable for a personal/small-group project. High-frequency GPS tracking or concurrent writes should move to Cloudflare D1 or another transactional store.
+- Route estimates and weather depend on public third-party services; they are not guaranteed real-time navigation or emergency services.
+- Exploration coverage is an approximate configurable grid, not an official municipal-area statistic.
+
+## 🔗 Links
+
+- [Live website](https://mehrdadmb2.github.io/shiraz-atlas/)
+- [Telegram bot](https://t.me/ShirazAtlasBot)
+- [Worker health](https://shiraz-atlas.game-developer-mb.workers.dev/api/health)
+- [Public source repository](https://github.com/mehrdadmb2/shiraz-atlas)
+- [Private data repository](https://github.com/mehrdadmb2/shiraz-atlas-data)
+
+## 📜 License
+
+MIT for the project source. External map tiles, geographic data and weather services retain their own attribution and terms.

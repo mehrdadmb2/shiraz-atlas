@@ -1,59 +1,29 @@
-# Shiraz Atlas Worker — راهنمای سریع
+# Shiraz Atlas Worker v1.1
 
-این پوشه شامل Cloudflare Worker، API سایت و Telegram webhook است.
+Cloudflare Worker API + Telegram webhook.
 
-## پیش‌نیازها
-
-- Node.js LTS و npm
-- حساب Cloudflare با دسترسی به Worker فعلی `shiraz-atlas`
-- GitHub Fine-grained PAT فقط برای ریپوی خصوصی `mehrdadmb2/shiraz-atlas-data` با دسترسی `Contents: Read and write`
-- توکن BotFather برای `@ShirazAtlasBot`
-
-## سازگاری Windows PowerShell 5.1
-
-فایل‌های `.ps1` این نسخه با UTF-8 BOM ذخیره شده‌اند تا PowerShell 5.1 متن فارسی را درست بخواند. فایل‌ها را با Notepad در حالت ANSI ذخیره نکن؛ اگر ویرایششان کردی، از UTF-8 with BOM استفاده کن.
-
-## نصب و تست
-
-در PowerShell از همین پوشه اجرا کن:
-
+## Local verification
 ```powershell
 npm install
 npm test
+npx wrangler dev
+```
+
+## Deploy
+```powershell
 npx wrangler login
-npx wrangler whoami
-```
-
-## Secretها
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\set-secrets.ps1
-```
-
-اسکریپت، توکن تلگرام، PAT، شناسه‌های عددی ادمین و رمز پنل وب را می‌گیرد و `SESSION_SECRET` تصادفی می‌سازد. اگر هنوز شناسه تلگرام را نمی‌دانی، فیلد را خالی بگذار؛ بعد از راه‌اندازی با `/myid` شناسه را بگیر و `TELEGRAM_ADMIN_IDS` را جداگانه تنظیم کن.
-
-## Deploy و Webhook
-
-```powershell
 npx wrangler deploy --config .\wrangler.toml
-.\scripts\set-webhook.ps1
 ```
 
-Webhook به این مسیر تنظیم می‌شود:
+## Live logs
+```powershell
+npx wrangler tail --format pretty
+```
 
-`https://shiraz-atlas.game-developer-mb.workers.dev/telegram/webhook`
+## Telegram admin delegation
+The first ID in `TELEGRAM_ADMIN_IDS` is the owner by default (or set `TELEGRAM_OWNER_ID`). The owner uses `/adminadd ID`, `/admins`, and `/adminremove ID`. Delegated IDs are persisted in private `atlas.json` under `meta.telegramAdmins`.
 
-## مقدارهای ثابت
+## Diagnostics
+Use Telegram `/test` or `GET /api/admin/diagnostics` with a valid website admin session. Checks are read-only; they do not create a test commit or mutate production data.
 
-`wrangler.toml` از قبل این موارد را تنظیم کرده است:
-
-- `GITHUB_OWNER=mehrdadmb2`
-- `GITHUB_DATA_REPO=shiraz-atlas-data`
-- `GITHUB_BRANCH=main`
-- `GITHUB_DATA_PATH=atlas.json`
-- `PUBLIC_SITE_URL=https://mehrdadmb2.github.io/shiraz-atlas/`
-
-فایل `atlas.json` باید در ریشه ریپوی خصوصی باشد. هرگز آن را در ریپوی عمومی Pages قرار نده.
-
-برای راهنمای مرحله‌به‌مرحله، اسکریپت‌ها، عیب‌یابی و تست نهایی، فایل `docs/DEPLOYMENT_FA.md` در بسته کامل پروژه را بخوان.
+Secrets: `TELEGRAM_BOT_TOKEN`, `GITHUB_TOKEN`, `TELEGRAM_ADMIN_IDS`, `TELEGRAM_OWNER_ID`, `WEB_ADMIN_PASSWORD`, `SESSION_SECRET`, `TELEGRAM_WEBHOOK_SECRET`.

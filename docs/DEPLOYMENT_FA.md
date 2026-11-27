@@ -298,3 +298,33 @@ Worker برای تداخل SHA در GitHub سه تلاش محدود انجام �
 ## 12) اندازه فایل و مقیاس‌پذیری
 
 در نسخه اول، تمام داده‌ها در `atlas.json` ذخیره می‌شوند و Worker سقف عملیاتی ۸۵۰ کیلوبایت را قبل از Commit کنترل می‌کند. دلیل این حاشیه اطمینان، محدودیت GitHub Contents API است: در فایل‌های بزرگ‌تر از ۱ مگابایت، فیلد `content` در پاسخ API خالی می‌شود. اگر تاریخچه GPS طولانی شد، مسیرهای قدیمی را Export و بایگانی کن یا قبل از نزدیک شدن به سقف، ذخیره‌سازی را به Cloudflare D1 منتقل کن.
+
+
+## 8) ارتقای نسخه 1.1 و مدیریت ادمین‌های تلگرام
+
+بعد از جایگزینی Worker نسخه 1.1 و Deploy:
+- اولین شناسه در `TELEGRAM_ADMIN_IDS` مالک اصلی محسوب می‌شود.
+- برای صراحت بیشتر، می‌توانی Secret مستقل `TELEGRAM_OWNER_ID` را با همان شناسه تنظیم کنی:
+  `npx wrangler secret put TELEGRAM_OWNER_ID --config .\wrangler.toml`
+- در ربات `/start` را بزن تا منوی دکمه‌ای جدید نمایش داده شود.
+- کاربر جدید `/myid` را می‌فرستد؛ مالک با `/adminadd USER_ID` او را اضافه می‌کند.
+- `/admins` فهرست را نشان می‌دهد و `/adminremove USER_ID` دسترسی واگذارشده را حذف می‌کند.
+- شناسه‌های bootstrap که در `TELEGRAM_ADMIN_IDS` هستند با فرمان ربات حذف نمی‌شوند.
+
+## 9) تست سلامت و مشاهده لاگ
+
+در ربات `/test` را بفرست. گزارش شامل تنظیمات Worker، دسترسی API به ریپوی عمومی سورس، پاسخ GitHub Pages، خواندن ریپوی خصوصی، ساختار JSON، Telegram Bot API و Webhook است. تست غیرمخرب است و چیزی در ریپو نمی‌نویسد.
+
+برای مشاهده لاگ زنده:
+
+```powershell
+npx wrangler tail --format pretty
+```
+
+یا Cloudflare Dashboard → Workers & Pages → `shiraz-atlas` → Logs / Observability.
+
+برای تست API از مرورگر:
+- عمومی: `https://shiraz-atlas.game-developer-mb.workers.dev/api/health`
+- خصوصی: `GET /api/admin/diagnostics` همراه هدر `Authorization: Bearer <admin-session>`؛ این نشست از ورود پنل سایت دریافت می‌شود.
+
+توجه: Worker نمی‌تواند وضعیت اجرای GitHub Actions یا دسترسی اکانت GitHub Pages را از این گزارش با قطعیت بررسی کند؛ برای آن‌ها GitHub → Actions را بررسی کن.

@@ -105,3 +105,8 @@ The Worker reloads the current GitHub blob SHA before writing and retries SHA co
 
 
 > **Storage ceiling:** نسخه فعلی Worker روی فایل JSON یکپارچه کار می‌کند و سقف امن آن ۸۵۰ KiB است. برای تاریخچه مسیر پرتعداد یا رشد طولانی‌مدت، Cloudflare D1 یا آرشیو ماهانه مسیرها در فایل‌های جداگانه انتخاب مناسب‌تری است.
+
+
+## Telegram admin delegation (schema 1.1)
+
+`meta.telegramAdmins` is an array of numeric Telegram user IDs delegated by the owner through `/adminadd`. The first ID in the Worker secret `TELEGRAM_ADMIN_IDS` is the owner by default (or use the explicit `TELEGRAM_OWNER_ID` secret). Bootstrap IDs remain in the secret and cannot be removed through bot commands. Delegated IDs are private data and are never included in the public API response.

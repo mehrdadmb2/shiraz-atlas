@@ -1,4 +1,4 @@
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const MAX_DATA_BYTES = 850 * 1024; // keep margin below GitHub Contents API's 1 MiB response boundary
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -120,7 +120,7 @@ function defaultData() {
       privacy: { visitsPrivateByDefault: true, routesPrivateByDefault: true }
     },
     categories: clone(DEFAULT_CATEGORIES), tags: [...DEFAULT_TAGS], places: [], visits: [], routes: [],
-    meta: { lastTelegramUpdateId: 0, processedTelegramUpdateIds: [], createdAt: new Date().toISOString() }
+    meta: { lastTelegramUpdateId: 0, processedTelegramUpdateIds: [], telegramAdmins: [], createdAt: new Date().toISOString() }
   };
 }
 function normalizeData(data) {
@@ -135,7 +135,8 @@ function normalizeData(data) {
   out.places = Array.isArray(data.places) ? data.places : [];
   out.visits = Array.isArray(data.visits) ? data.visits : [];
   out.routes = Array.isArray(data.routes) ? data.routes : [];
-  out.meta = { lastTelegramUpdateId: 0, processedTelegramUpdateIds: [], ...(data.meta || {}) };
+  out.meta = { lastTelegramUpdateId: 0, processedTelegramUpdateIds: [], telegramAdmins: [], ...(data.meta || {}) };
+  if (!Array.isArray(out.meta.telegramAdmins)) out.meta.telegramAdmins = [];
   if (!Array.isArray(out.meta.processedTelegramUpdateIds)) out.meta.processedTelegramUpdateIds = [];
   return out;
 }
@@ -403,6 +404,16 @@ function mutateAtlas(data, action, payload = {}) {
     const tag = safeText(payload.name, 50); const index = data.tags.findIndex(t => t.toLowerCase() === tag.toLowerCase()); if (index < 0) throw new Error('برچسب پیدا نشد.');
     data.tags.splice(index, 1); data.places.forEach(p => { p.tags = (p.tags || []).filter(t => t.toLowerCase() !== tag.toLowerCase()); }); return { name: tag };
   }
+  if(action==='admin.add'){
+ const id=safeText(payload.userId,32);if(!/^\d{5,20}$/.test(id))throw new Error('شناسه عددی معتبر نیست.');
+ if(data.meta.telegramAdmins.includes(id))throw new Error('این کاربر از قبل ادمین است.');
+ data.meta.telegramAdmins.push(id);return{userId:id};
+ }
+ if(action==='admin.remove'){
+ const id=safeText(payload.userId,32),i=data.meta.telegramAdmins.indexOf(id);
+ if(i<0)throw new Error('شناسه در فهرست ادمین‌های افزوده‌شده نیست.');
+ data.meta.telegramAdmins.splice(i,1);return{userId:id};
+ }
   if (action === 'settings.update') {
     if (payload.explorationBounds) {
       const b = payload.explorationBounds;
@@ -504,9 +515,22 @@ async function telegramCall(env, method, payload) {
   if (!response.ok || !body.ok) throw new Error(body.description || `Telegram ${method} failed`);
   return body.result;
 }
-function isAdmin(userId, env) {
-  const ids = (env.TELEGRAM_ADMIN_IDS || '').split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
-  return ids.includes(String(userId));
+async function isAdmin(userId, env, knownData = null) {
+ const bootstrap=(env.TELEGRAM_ADMIN_IDS||'').split(/[\s,;]+/).filter(Boolean);
+ if(bootstrap.includes(String(userId)))return true;
+ try{const d=knownData||await getBotData(env);return(d.meta?.telegramAdmins||[]).includes(String(userId));}
+ catch(e){console.error(JSON.stringify({level:'error',event:'admin_lookup_failed',message:e.message}));return false;}
+}
+function isOwner(userId,env){const id=String(env.TELEGRAM_OWNER_ID||(env.TELEGRAM_ADMIN_IDS||'').split(/[\s,;]+/).filter(Boolean)[0]||'');return !!id&&id===String(userId);}
+function botKeyboard(admin,owner){
+ const rows=[
+ [{text:'📍 مکان‌ها',callback_data:'menu:places'},{text:'🎲 مقصد شانسی',callback_data:'menu:random'}],
+ [{text:'🗂 دسته‌بندی‌ها',callback_data:'menu:categories'},{text:'🌤 آب‌وهوا',callback_data:'menu:weather'}],
+ [{text:'📌 نزدیک من',callback_data:'menu:near'},{text:'🌐 نقشه اطلس',url:'https://mehrdadmb2.github.io/shiraz-atlas/'}]
+ ];
+ if(admin)rows.push([{text:'➕ ثبت مکان',callback_data:'admin:add'},{text:'🛠 پنل مدیریت',callback_data:'admin:panel'}],[{text:'🧪 تست سلامت پروژه',callback_data:'admin:test'}]);
+ if(owner)rows.push([{text:'👥 مدیریت ادمین‌ها',callback_data:'owner:admins'}]);
+ return{inline_keyboard:rows};
 }
 function tgEscape(value) { return String(value ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 async function tgMessage(env, chatId, message, options = {}) {
@@ -565,14 +589,48 @@ function categoryLookup(data, value) {
   if (!s) return data.categories[0]?.id || 'hidden';
   return data.categories.find(c => c.id.toLowerCase() === s || c.name.toLowerCase() === s)?.id || slug(s);
 }
-function formatHelp(admin) {
-  return `<b>🧭 راهنمای Shiraz Atlas</b>\n\n<b>دستورات عمومی</b>\n/start — شروع\n/help — راهنما\n/myid — نمایش شناسه تلگرام\n/places — فهرست مکان‌ها\n/search عبارت — جست‌وجو\n/random [دسته] — مقصد تصادفی\n/near lat,lng — مکان‌های نزدیک مختصات\n/categories — دسته‌بندی‌ها\n/weather [lat,lng] — وضعیت هوا\n\n${admin ? `<b>🔐 دستورات ادمین</b>\n/add نام | lat,lng | دسته | ورودی | توضیحات\n/edit ID | name=... | fee=... | tags=...\n/delete ID — حذف با تأیید\n/visit ID | good/normal/bad | یادداشت\n/route نام | کیفیت | lat,lng;lat,lng | یادداشت\n/categoryadd نام | ایموجی\n/tagadd نام\n/stats — آمار خصوصی\n\n<b>ارسال لوکیشن</b>\nمختصات را مستقیم بفرست؛ مثال:\n<code>29.722356, 52.470975</code>\nیا مختصات DMS:\n<code>29°43'20.5\"N 52°28'15.5\"E</code>\n\nبرای افزودن با جزئیات:\n<code>/add باغ ارم | 29.63,52.53 | طبیعت و باغ | 50000 | توضیحات</code>` : 'برای عملیات مدیریتی باید شناسه عددی تلگرام شما در فهرست ادمین‌ها ثبت شده باشد.'}\n\n🌐 <a href="${'https://mehrdadmb2.github.io/shiraz-atlas/'}">باز کردن نقشه Shiraz Atlas</a>`;
+async function runDiagnostics(env){
+ const checks=[],add=(name,ok,detail)=>checks.push({name,ok:!!ok,detail:safeText(detail,180)});
+ add('GitHub credentials',!!(env.GITHUB_OWNER&&env.GITHUB_DATA_REPO&&env.GITHUB_TOKEN),'Owner / private repo / token');
+ add('Session security',!!(env.SESSION_SECRET&&env.SESSION_SECRET.length>=32),'SESSION_SECRET >= 32 chars');
+ add('Telegram token',!!env.TELEGRAM_BOT_TOKEN,'Bot token configured');
+ add('Webhook secret',!!env.TELEGRAM_WEBHOOK_SECRET,'Webhook secret configured');
+ try{const repoRes=await fetch(`https://api.github.com/repos/${encodeURIComponent(env.GITHUB_OWNER||'mehrdadmb2')}/shiraz-atlas`,{headers:{'Accept':'application/vnd.github+json','User-Agent':'Shiraz-Atlas-Diagnostics'}});add('Public source repository',repoRes.ok,`GitHub API HTTP ${repoRes.status}`);}catch(e){add('Public source repository',false,e.message);}
+ if(env.PUBLIC_SITE_URL)try{const pageRes=await fetch(env.PUBLIC_SITE_URL,{headers:{'user-agent':'ShirazAtlas-Diagnostics/1.1'}});add('GitHub Pages website',pageRes.ok,`HTTP ${pageRes.status} · ${env.PUBLIC_SITE_URL}`);}catch(e){add('GitHub Pages website',false,e.message);}
+
+ try{const{data,cfg}=await readData(env);add('Private data repository',true,`${cfg.owner}/${cfg.repo}/${cfg.path}`);add('Data integrity',Array.isArray(data.places)&&Array.isArray(data.routes)&&Array.isArray(data.visits),`places=${data.places.length}, routes=${data.routes.length}, visits=${data.visits.length}`);}
+ catch(e){add('Private data repository',false,e.message);}
+ if(env.TELEGRAM_BOT_TOKEN)try{const me=await telegramCall(env,'getMe',{});add('Telegram Bot API',true,`@${me.username}`);const wh=await telegramCall(env,'getWebhookInfo',{});add('Telegram webhook',!!wh.url,wh.url?`pending=${wh.pending_update_count||0}`:'Webhook URL is empty');if(wh.last_error_message)add('Webhook last error',false,wh.last_error_message);}catch(e){add('Telegram Bot API',false,e.message);}
+ console.log(JSON.stringify({level:'info',event:'diagnostics',at:new Date().toISOString(),checks}));return checks;
+}
+async function sendHome(env, chatId, fromId) {
+  const admin = await isAdmin(fromId, env);
+  return tgMessage(env, chatId, `<b>🧭 Shiraz Atlas</b>
+اطلس شخصی کشف مکان‌ها و ثبت ماجراجویی‌های تو
+
+از دکمه‌های زیر استفاده کن؛ /help راهنمای کامل است.`, { reply_markup: botKeyboard(admin, isOwner(fromId, env)) });
+}
+function formatHelp(admin, owner = false) {
+  const lines = ['<b>🧭 راهنمای Shiraz Atlas</b>', '', '<b>🌍 دستورات عمومی</b>',
+    '/start — منوی اصلی و دکمه‌ها', '/help — راهنمای دستورات', '/myid — شناسه عددی تلگرام',
+    '/places — فهرست مکان‌ها', '/search عبارت — جست‌وجو', '/random [دسته/برچسب] — مقصد تصادفی',
+    '/near lat,lng — مکان‌های نزدیک', '/categories — دسته‌بندی‌ها', '/weather [lat,lng] — هواشناسی'];
+  if (admin) lines.push('', '<b>🔐 مدیریت</b>', '/add نام | lat,lng | دسته | ورودی | توضیحات',
+    '/edit ID | name=... | fee=... | tags=...', '/delete ID — حذف با تأیید',
+    '/visit ID | good/normal/bad | یادداشت', '/route نام | کیفیت | lat,lng;lat,lng | یادداشت',
+    '/categoryadd نام | ایموجی', '/tagadd نام', '/stats — آمار خصوصی', '/test — تست سلامت پروژه',
+    'ارسال مستقیم مختصات یا Location برای ثبت سریع.');
+  if (owner) lines.push('', '<b>👑 مالک اصلی</b>', '/admins — فهرست ادمین‌ها',
+    '/adminadd 123456789 — افزودن ادمین', '/adminremove 123456789 — حذف ادمین');
+  if (!admin) lines.push('', 'برای مدیریت، دسترسی ادمین لازم است.');
+  lines.push('', '<a href="https://mehrdadmb2.github.io/shiraz-atlas/">🌐 باز کردن نقشه اطلس</a>');
+  return lines.join('\n');
 }
 async function getBotData(env) { return (await readData(env)).data; }
 async function handleTelegramMessage(message, update, env) {
   const chatId = message.chat?.id, fromId = message.from?.id;
   if (!chatId || !fromId) return;
-  const admin = isAdmin(fromId, env);
+  const admin = await isAdmin(fromId, env);
   const rawText = String(message.text || message.caption || '').trim();
   if (message.location) {
     const point = { lat: Number(message.location.latitude), lng: Number(message.location.longitude) };
@@ -598,9 +656,25 @@ async function handleTelegramMessage(message, update, env) {
     const aliases = { 'کمک':'help', 'راهنما':'help', 'مکانها':'places', 'مکان‌ها':'places', 'تصادفی':'random', 'افزودن':'add', 'بازدید':'visit', 'آمار':'stats' };
     const cmd = aliases[command] || command;
     if (cmd === 'start') return tgMessage(env, chatId, `سلام ${tgEscape(message.from.first_name || 'دوست من')}! 👋\nبه <b>Shiraz Atlas</b> خوش آمدی.\n\nمکان‌های موردعلاقه‌ات را ذخیره کن، مقصد تصادفی بگیر و مسیرهایت را ثبت کن.\n\n/help برای راهنما`);
-    if (cmd === 'help') return tgMessage(env, chatId, formatHelp(admin));
+    if (cmd === 'help') return tgMessage(env, chatId, formatHelp(admin,isOwner(fromId,env)),{reply_markup:botKeyboard(admin,isOwner(fromId,env))});
     if (cmd === 'myid' || cmd === 'whoami') return tgMessage(env, chatId, `شناسه عددی تلگرام شما:\n<code>${fromId}</code>\n${admin ? '✅ دسترسی ادمین فعال است.' : 'دسترسی مدیریتی فعال نیست.'}`);
     if (cmd === 'cancel') return tgMessage(env, chatId, 'عملیات جاری لغو شد.');
+    if(['test','health','diagnostics'].includes(cmd)){
+      if(!admin)return tgMessage(env,chatId,'⛔ فقط ادمین‌ها اجازه اجرای تست را دارند.');
+      const checks=await runDiagnostics(env),ok=checks.filter(x=>x.ok).length;
+      return tgMessage(env,chatId,`<b>🧪 گزارش سلامت Shiraz Atlas</b>\n${checks.map(x=>`${x.ok?'✅':'❌'} <b>${tgEscape(x.name)}</b>\n<code>${tgEscape(x.detail)}</code>`).join('\n\n')}\n\n<b>${ok}/${checks.length} موفق</b>\n📋 لاگ ساختاریافته در Cloudflare Worker → Logs ثبت شد.`);
+    }
+    if(cmd==='admins'){
+      if(!isOwner(fromId,env))return tgMessage(env,chatId,'⛔ فقط مالک اصلی.');
+      const d=await getBotData(env),boot=(env.TELEGRAM_ADMIN_IDS||'').split(/[\s,;]+/).filter(Boolean),ids=[...new Set([...boot,...(d.meta.telegramAdmins||[])])];
+      return tgMessage(env,chatId,`<b>👥 فهرست ادمین‌ها</b>\n${ids.map((id,i)=>`${i+1}. <code>${tgEscape(id)}</code>${boot.includes(id)?' · اصلی':''}`).join('\n')||'خالی'}\n\n/adminadd 123456789\n/adminremove 123456789`);
+    }
+    if(cmd==='adminadd'||cmd==='adminremove'){
+      if(!isOwner(fromId,env))return tgMessage(env,chatId,'⛔ فقط مالک اصلی اجازه مدیریت ادمین‌ها را دارد.');
+      const userId=argText.replace(/[^0-9]/g,'');if(!/^\d{5,20}$/.test(userId))return tgMessage(env,chatId,'شناسه معتبر نیست؛ کاربر ابتدا /myid را ارسال کند.');
+      await adminMutation(env,cmd==='adminadd'?'admin.add':'admin.remove',{userId},update.update_id);
+      return tgMessage(env,chatId,cmd==='adminadd'?`✅ <code>${userId}</code> ادمین شد.`:`🗑 <code>${userId}</code> از ادمین‌های افزوده‌شده حذف شد.`);
+    }
     if (cmd === 'categories') { const data = await getBotData(env); return tgMessage(env, chatId, '<b>🗂 دسته‌بندی‌های اطلس</b>\n' + data.categories.map(c => `${c.icon || '✦'} ${tgEscape(c.name)}`).join('\n') + '\n\nبرچسب‌ها: ' + data.tags.map(tgEscape).join(' · ')); }
     if (cmd === 'weather') {
       const point = parseCoordinates(argText) || { lat: 29.5918, lng: 52.5837 };
@@ -697,7 +771,7 @@ async function handleTelegramCallback(callback, update, env) {
   const data = String(callback.data || '');
   if (data === 'delcancel') { await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id, text: 'حذف لغو شد.' }); return; }
   if (data.startsWith('del:')) {
-    if (!isAdmin(fromId, env)) { await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id, text: 'دسترسی ادمین ندارید.', show_alert: true }); return; }
+    if (!await isAdmin(fromId, env)) { await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id, text: 'دسترسی ادمین ندارید.', show_alert: true }); return; }
     const id = data.slice(4);
     try {
       const saved = await adminMutation(env, 'place.delete', { id }, update.update_id);
@@ -705,7 +779,34 @@ async function handleTelegramCallback(callback, update, env) {
       if (!saved.result?.duplicate) await tgMessage(env, chatId, `🗑 مکان <code>${tgEscape(id)}</code> حذف شد.`);
     } catch (error) { await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id, text: error.message, show_alert: true }); }
   }
+
+  const admin=await isAdmin(fromId,env);
+  if(data.startsWith('menu:')){
+    await telegramCall(env,'answerCallbackQuery',{callback_query_id:callback.id});
+    const cmd=data.slice(5);
+    if(['places','random','categories','weather'].includes(cmd))return handleTelegramMessage({chat:callback.message.chat,from:callback.from,text:`/${cmd}`},update,env);
+    if(cmd==='near')return tgMessage(env,chatId,'📍 موقعیت خود را به‌صورت Location ارسال کن یا /near lat,lng را بفرست.');
+  }
+  if(data==='admin:add'||data==='admin:panel'){
+    await telegramCall(env,'answerCallbackQuery',{callback_query_id:callback.id});
+    if(!admin)return tgMessage(env,chatId,'⛔ دسترسی ادمین لازم است.');
+    return tgMessage(env,chatId,'🛠 پنل مدیریت\nبرای ثبت مکان، Location یا مختصات بفرست.\n<code>/add نام | lat,lng | دسته | ورودی | توضیحات</code>',{reply_markup:{inline_keyboard:[[{text:'🧪 تست سلامت',callback_data:'admin:test'},{text:'📊 آمار',callback_data:'admin:stats'}],[{text:'📚 راهنما',callback_data:'admin:help'}]]}});
+  }
+  if(data==='admin:test'){
+    await telegramCall(env,'answerCallbackQuery',{callback_query_id:callback.id,text:'در حال بررسی...'});
+    if(!admin)return tgMessage(env,chatId,'⛔ دسترسی ادمین لازم است.');
+    const checks=await runDiagnostics(env),ok=checks.filter(x=>x.ok).length;
+    return tgMessage(env,chatId,`<b>🧪 تست سلامت</b>\n${checks.map(x=>`${x.ok?'✅':'❌'} ${tgEscape(x.name)}: ${tgEscape(x.detail)}`).join('\n')}\n<b>${ok}/${checks.length} موفق</b>`);
+  }
+  if(data==='admin:stats'||data==='admin:help'||data==='owner:admins'){
+    await telegramCall(env,'answerCallbackQuery',{callback_query_id:callback.id});
+    if(data==='owner:admins'&&!isOwner(fromId,env))return tgMessage(env,chatId,'⛔ فقط مالک اصلی.');
+    if(data==='admin:stats')return handleTelegramMessage({chat:callback.message.chat,from:callback.from,text:'/stats'},update,env);
+    if(data==='owner:admins')return handleTelegramMessage({chat:callback.message.chat,from:callback.from,text:'/admins'},update,env);
+    return tgMessage(env,chatId,formatHelp(admin,isOwner(fromId,env)));
+  }
 }
+
 async function telegramWebhook(request, env) {
   if (!env.TELEGRAM_WEBHOOK_SECRET || request.headers.get('X-Telegram-Bot-Api-Secret-Token') !== env.TELEGRAM_WEBHOOK_SECRET) return text('Forbidden', 403);
   let update; try { update = await request.json(); } catch { return text('Bad Request', 400); }
@@ -746,6 +847,7 @@ async function routeRequest(request, env) {
     catch (error) { return json({ error: error.message }, 503); }
   }
   if (path === '/api/admin/mutate' && request.method === 'POST') return handleMutation(request, env);
+  if (path === '/api/admin/diagnostics' && request.method === 'GET') { if (!await requireAdmin(request, env)) return json({ error: 'نشست ادمین معتبر نیست.' }, 401); const checks = await runDiagnostics(env); return json({ ok: checks.every(x => x.ok), checks, timestamp: new Date().toISOString() }); }
   if (path === '/api/discover' && request.method === 'GET') return discoverNearby(url);
   if (path === '/api/route' && request.method === 'GET') return routePreview(url);
   if (path === '/api/weather' && request.method === 'GET') return weatherFor(url);
